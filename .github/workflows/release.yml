@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/check-version.sh
+
+  # Source only: the module is built per kernel by DKMS, so there are no
+  # binary archives, and OS packages are published through their own
+  # repositories below, never as release assets.
+  github:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes --title "ownfs ${GITHUB_REF_NAME#v}"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  ppa:
+    needs: check
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { series: jammy, release: "22.04" }
+          - { series: noble, release: "24.04" }
+          - { series: resolute, release: "26.04" }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q devscripts debhelper dput-ng
+      - name: Import signing key
+        run: |
+          echo "$PACKAGE_SIGNING_KEY" | gpg --batch --import
+          echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
+          gpgconf --reload gpg-agent
+        env:
+          PACKAGE_SIGNING_KEY: ${{ secrets.PACKAGE_SIGNING_KEY }}
+      - name: Build and upload source package
+        run: |
+          version="${GITHUB_REF_NAME#v}~ubuntu${{ matrix.release }}.1"
+          export DEBFULLNAME="Will Rouesnel" DEBEMAIL="wrouesnel@wrouesnel.com"
+          dch -b -v "$version" -D "${{ matrix.series }}" "Release ${GITHUB_REF_NAME#v} for Ubuntu ${{ matrix.release }}."
+          printf '%s' "$PACKAGE_SIGNING_KEY_PASSPHRASE" > "$RUNNER_TEMP/pass"
+          dpkg-buildpackage -S -d -nc \
+            --sign-key="${{ vars.PACKAGE_SIGNING_KEY_FINGERPRINT }}" \
+            --sign-command="gpg --batch --pinentry-mode loopback --passphrase-file $RUNNER_TEMP/pass"
+          rm -f "$RUNNER_TEMP/pass"
+          dput ppa:w-rouesnel/ownfs ../ownfs_${version}_source.changes
+        env:
+          PACKAGE_SIGNING_KEY_PASSPHRASE: ${{ secrets.PACKAGE_SIGNING_KEY_PASSPHRASE }}
+
+  copr:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger COPR build
+        run: |
+          pipx install copr-cli
+          mkdir -p ~/.config
+          printf '%s\n' "$COPR_CONFIG" > ~/.config/copr
+          copr-cli buildscm --clone-url "https://github.com/${GITHUB_REPOSITORY}" \
+            --commit "$GITHUB_REF_NAME" --method make_srpm wrouesnel/ownfs
+        env:
+          COPR_CONFIG: ${{ secrets.COPR_CONFIG }}

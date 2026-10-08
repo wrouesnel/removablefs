@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/check-version.sh
+
+  # Compile the module against each target distribution's newest kernel
+  # headers, with warnings as errors.  Functional tests need a real kernel
+  # and run in VMs (tests/vm/test.sh), not here.
+  module:
+    name: module (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: ubuntu-22.04, image: "ubuntu:22.04", headers: linux-headers-generic }
+          - { name: ubuntu-22.04-hwe, image: "ubuntu:22.04", headers: linux-headers-generic-hwe-22.04 }
+          - { name: ubuntu-24.04, image: "ubuntu:24.04", headers: linux-headers-generic }
+          - { name: ubuntu-24.04-hwe, image: "ubuntu:24.04", headers: linux-headers-generic-hwe-24.04 }
+          - { name: ubuntu-26.04, image: "ubuntu:26.04", headers: linux-headers-generic }
+          - { name: el8, image: "almalinux:8", headers: kernel-devel }
+          - { name: el9, image: "almalinux:9", headers: kernel-devel }
+          - { name: el10, image: "almalinux:10", headers: kernel-devel }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain and headers
+        run: |
+          if command -v apt-get >/dev/null; then
+            apt-get update -q
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -q build-essential kmod ${{ matrix.headers }}
+          else
+            dnf -y -q install gcc make elfutils-libelf-devel kmod ${{ matrix.headers }}
+          fi
+      - name: Build
+        run: |
+          kdir="$(ls -d /usr/src/kernels/* /usr/src/linux-headers-*-generic 2>/dev/null | sort -V | tail -1)"
+          echo "building against $kdir"
+          make -C module KDIR="$kdir" KCFLAGS=-Werror
+          cat module/ownfs_config.h
+          modinfo module/ownfs.ko
+
+  deb:
+    name: deb (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["ubuntu:22.04", "ubuntu:24.04", "ubuntu:26.04"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          apt-get update -q
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -q build-essential devscripts equivs git
+          mk-build-deps -i -r -t 'apt-get -y -q --no-install-recommends' debian/control
+      - name: Build packages
+        run: make deb
+      - name: Install and build the module with DKMS
+        run: |
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -q linux-headers-generic ./dist/*.deb
+          kver="$(ls /lib/modules | sort -V | tail -1)"
+          dkms build -m ownfs -v "$(sed -n 's/^Version: *//p' rpm/ownfs.spec)" -k "$kver"
+          dkms status
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-${{ strategy.job-index }}
+          path: dist/*.deb
+
+  rpm:
+    name: rpm (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["almalinux:8", "almalinux:9", "almalinux:10"]
+    steps:
+      - name: Install build dependencies
+        run: dnf -y -q install git tar make rpm-build systemd-rpm-macros
+      - uses: actions/checkout@v4
+      - name: Build packages
+        run: |
+          git config --global --add safe.directory "$PWD"
+          make rpm
+      - name: Install and build the module with DKMS
+        run: |
+          dnf -y -q install epel-release
+          dnf -y -q install kernel-devel
+          dnf -y -q install dist/noarch/*.rpm
+          kver="$(ls /usr/src/kernels | sort -V | tail -1)"
+          dkms build -m ownfs -v "$(sed -n 's/^Version: *//p' rpm/ownfs.spec)" -k "$kver"
+          dkms status
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpm-${{ strategy.job-index }}
+          path: dist/noarch/*.rpm

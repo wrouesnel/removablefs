@@ -1,0 +1,9 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = configure ] && command -v udevadm >/dev/null 2>&1; then
+	# Pick up the new rule for drives plugged in from now on.
+	udevadm control --reload-rules || true
+fi
+
+#DEBHELPER#

@@ -1,0 +1,27 @@
+#!/usr/bin/make -f
+
+# The DKMS module version is the upstream part of the package version.
+VERSION := $(shell dpkg-parsechangelog -SVersion | sed -e 's/[~+-].*//')
+SRC := debian/ownfs-dkms/usr/src/ownfs-$(VERSION)
+
+%:
+	dh $@
+
+# Nothing to build here: DKMS builds the module on the target system.
+override_dh_auto_build override_dh_auto_test override_dh_auto_install override_dh_auto_clean:
+
+override_dh_install:
+	install -d $(SRC)
+	install -m 0644 module/*.c module/*.h module/Kbuild module/Makefile module/dkms.conf $(SRC)/
+	install -m 0755 module/configure $(SRC)/
+	dh_install
+
+override_dh_dkms:
+	dh_dkms -p ownfs-dkms -V $(VERSION) -- module/dkms.conf
+
+override_dh_installudev:
+	cp data/udev/85-ownfs.rules debian/ownfs.udev
+	dh_installudev -p ownfs --priority=85
+
+override_dh_clean:
+	dh_clean debian/ownfs.udev
