@@ -20,6 +20,8 @@
 #include <linux/capability.h>
 #include <linux/parser.h>
 #include <linux/string.h>
+#include <linux/blk_types.h>
+#include <linux/blkdev.h>
 #ifdef HAVE_FS_CONTEXT
 #include <linux/fs_context.h>
 #endif
@@ -214,6 +216,24 @@ static struct vfsmount *ownfs_mount_lower(struct ownfs_mount_opts *o,
 	return mnt;
 }
 
+/* The dev_t of the block device at @path, if it is one; else unchanged. */
+static void ownfs_source_dev(const char *path, dev_t *dev)
+{
+#if defined(HAVE_LOOKUP_BDEV_DEV)
+	dev_t d;
+
+	if (!lookup_bdev(path, &d))
+		*dev = d;
+#elif defined(HAVE_LOOKUP_BDEV_PTR)
+	struct block_device *bdev = lookup_bdev(path);
+
+	if (!IS_ERR(bdev)) {
+		*dev = bdev->bd_dev;
+		bdput(bdev);
+	}
+#endif
+}
+
 /*
  * The credentials every lower operation runs with: the mounter's (udisksd,
  * normally), with fsuid/fsgid set to the drive's owner so new files are
@@ -322,9 +342,16 @@ static int ownfs_fill_super(struct super_block *sb,
 	 * the desktop then show the drive as mounted (and offer to eject it),
 	 * and st_dev from stat() agrees with mountinfo.  The anonymous dev_t
 	 * goes back before kill_anon_super() frees it.
+	 *
+	 * btrfs has an anonymous s_dev of its own; udisks2 only resolves those
+	 * through the mount source for fstype "btrfs", so use the block device
+	 * itself.  st_dev then stays btrfs's per-subvolume value, as it must:
+	 * inode numbers repeat across subvolumes.
 	 */
 	sbi->anon_dev = sb->s_dev;
 	sb->s_dev = lower_sb->s_dev;
+	if (MAJOR(sb->s_dev) == 0)
+		ownfs_source_dev(o->source, &sb->s_dev);
 
 	root = ownfs_iget(sb, d_inode(lower_root));
 	if (IS_ERR(root))

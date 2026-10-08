@@ -132,6 +132,15 @@ probe HAVE_INODE_JUST_DROP <<'EOF'
 static const struct super_operations s = { .drop_inode = inode_just_drop };
 EOF
 
+probe HAVE_LOOKUP_BDEV_DEV <<'EOF'
+#include <linux/blkdev.h>
+static int f(const char *p, dev_t *d) { return lookup_bdev(p, d); }
+EOF
+probe HAVE_LOOKUP_BDEV_PTR <<'EOF'
+#include <linux/blkdev.h>
+static struct block_device *f(const char *p) { struct block_device *b = lookup_bdev(p); bdput(b); return b; }
+EOF
+
 # --- files ---------------------------------------------------------------------
 probe HAVE_VMA_SET_FILE <<'EOF'
 static void f(struct vm_area_struct *v, struct file *fl) { vma_set_file(v, fl); }

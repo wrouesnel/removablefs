@@ -17,3 +17,4 @@ Module.symvers
 modules.order
 .tmp_versions/
 /module/ownfs_config.h
+/dist/
