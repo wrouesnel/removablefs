@@ -1,0 +1,182 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Probe the target kernel's headers for the VFS API variants ownfs supports
+# and write ownfs_config.h.  Each probe is a small translation unit; all of
+# them are compiled in one kbuild run and a probe passes if its object file
+# was produced.  Version numbers are never consulted, because distribution
+# kernels (RHEL above all) backport API changes freely.
+#
+# Usage: ./configure [KDIR]     (default: /lib/modules/$(uname -r)/build)
+set -eu
+
+KDIR="${1:-${KDIR:-/lib/modules/$(uname -r)/build}}"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+OUT="${HERE}/ownfs_config.h"
+
+[ -f "${KDIR}/Makefile" ] || { echo "configure: no kernel build tree at ${KDIR}" >&2; exit 1; }
+
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/ownfs-conftest.XXXXXX")"
+trap 'rm -rf "$WORK"' EXIT
+
+: > "${WORK}/Kbuild"
+echo 'ccflags-y += -Werror=incompatible-pointer-types -Werror=implicit-function-declaration -Werror=int-conversion -Werror=return-type -Wno-unused-function -Wno-unused-variable' >> "${WORK}/Kbuild"
+PROBES=""
+
+# probe NAME < source-body
+probe() {
+	{
+		echo '#include <linux/module.h>'
+		echo '#include <linux/fs.h>'
+		echo '#include <linux/namei.h>'
+		echo '#include <linux/xattr.h>'
+		echo '#include <linux/mm.h>'
+		echo '#include <linux/splice.h>'
+		echo '#include <linux/mount.h>'
+		cat
+		echo 'MODULE_LICENSE("GPL");'
+	} > "${WORK}/$1.c"
+	echo "obj-m += $1.o" >> "${WORK}/Kbuild"
+	PROBES="${PROBES} $1"
+}
+
+# --- idmapped/user-namespace arguments -------------------------------------
+probe HAVE_IOP_IDMAP <<'EOF'
+static int f(struct mnt_idmap *m, struct inode *i, struct dentry *d, umode_t mo, bool e) { return 0; }
+static const struct inode_operations iop = { .create = f };
+EOF
+probe HAVE_IOP_USERNS <<'EOF'
+static int f(struct user_namespace *m, struct inode *i, struct dentry *d, umode_t mo, bool e) { return 0; }
+static const struct inode_operations iop = { .create = f };
+EOF
+probe HAVE_VFS_IDMAP <<'EOF'
+static int f(struct inode *i, struct dentry *d) { return vfs_unlink(&nop_mnt_idmap, i, d, NULL); }
+EOF
+probe HAVE_VFS_USERNS <<'EOF'
+static int f(struct inode *i, struct dentry *d) { return vfs_unlink(&init_user_ns, i, d, NULL); }
+EOF
+probe HAVE_XATTR_SET_IDMAP <<'EOF'
+static int f(const struct xattr_handler *h, struct mnt_idmap *m, struct dentry *d, struct inode *i,
+	     const char *n, const void *v, size_t s, int fl) { return 0; }
+static const struct xattr_handler x = { .set = f };
+EOF
+probe HAVE_XATTR_SET_USERNS <<'EOF'
+static int f(const struct xattr_handler *h, struct user_namespace *m, struct dentry *d, struct inode *i,
+	     const char *n, const void *v, size_t s, int fl) { return 0; }
+static const struct xattr_handler x = { .set = f };
+EOF
+
+# --- directory operations -----------------------------------------------------
+probe HAVE_IOP_MKDIR_DENTRY <<'EOF'
+static struct dentry *f(struct mnt_idmap *m, struct inode *i, struct dentry *d, umode_t mo) { return NULL; }
+static const struct inode_operations iop = { .mkdir = f };
+EOF
+probe HAVE_VFS_MKDIR_DENTRY <<'EOF'
+static struct dentry *f(struct inode *i, struct dentry *d) { return vfs_mkdir(&nop_mnt_idmap, i, d, 0); }
+EOF
+probe HAVE_VFS_MKDIR_DELEG <<'EOF'
+static struct dentry *f(struct inode *i, struct dentry *d) { return vfs_mkdir(&nop_mnt_idmap, i, d, 0, NULL); }
+EOF
+probe HAVE_VFS_MKNOD_DELEG <<'EOF'
+static int f(struct inode *i, struct dentry *d) { return vfs_mknod(&nop_mnt_idmap, i, d, 0, 0, NULL); }
+EOF
+probe HAVE_VFS_SYMLINK_DELEG <<'EOF'
+static int f(struct inode *i, struct dentry *d) { return vfs_symlink(&nop_mnt_idmap, i, d, "x", NULL); }
+EOF
+probe HAVE_VFS_RMDIR_DELEG <<'EOF'
+static int f(struct inode *i, struct dentry *d) { return vfs_rmdir(&nop_mnt_idmap, i, d, NULL); }
+EOF
+probe HAVE_VFS_CREATE_NO_EXCL <<'EOF'
+static int f(struct dentry *d) { return vfs_create(&nop_mnt_idmap, d, 0, NULL); }
+EOF
+probe HAVE_RENAMEDATA <<'EOF'
+static int f(struct inode *i) { struct renamedata rd = { .old_dir = i }; return vfs_rename(&rd); }
+EOF
+probe HAVE_RENAMEDATA_PARENT <<'EOF'
+static int f(struct dentry *d) { struct renamedata rd = { .mnt_idmap = &nop_mnt_idmap, .old_parent = d }; return vfs_rename(&rd); }
+EOF
+probe HAVE_LOOKUP_NOPERM <<'EOF'
+static struct dentry *f(struct dentry *d) { struct qstr q = QSTR_INIT("x", 1); return lookup_noperm(&q, d); }
+EOF
+
+# --- superblock and inodes ------------------------------------------------------
+probe HAVE_FS_CONTEXT <<'EOF'
+#include <linux/fs_context.h>
+static int fill(struct super_block *sb, struct fs_context *fc) { return 0; }
+static int f(struct fs_context *fc) { return get_tree_nodev(fc, fill); }
+static struct file_system_type t = { .init_fs_context = NULL };
+EOF
+probe HAVE_FREE_INODE <<'EOF'
+static void f(struct inode *i) { }
+static const struct super_operations s = { .free_inode = f };
+EOF
+probe HAVE_ALLOC_INODE_SB <<'EOF'
+static void *f(struct super_block *sb, struct kmem_cache *c) { return alloc_inode_sb(sb, c, GFP_KERNEL); }
+EOF
+probe HAVE_SB_TIME_MINMAX <<'EOF'
+static void f(struct super_block *sb) { sb->s_time_min = 0; sb->s_time_max = 0; }
+EOF
+probe HAVE_SET_DEFAULT_D_OP <<'EOF'
+static void f(struct super_block *sb) { set_default_d_op(sb, NULL); }
+EOF
+probe HAVE_INODE_STATE_READ_ONCE <<'EOF'
+static unsigned long f(struct inode *i) { return inode_state_read_once(i) & I_NEW; }
+EOF
+probe HAVE_INODE_GET_MTIME <<'EOF'
+static struct timespec64 f(struct inode *i) { return inode_get_mtime(i); }
+EOF
+probe HAVE_INODE_GET_CTIME <<'EOF'
+static struct timespec64 f(struct inode *i) { return inode_get_ctime(i); }
+EOF
+probe HAVE_INODE_JUST_DROP <<'EOF'
+static const struct super_operations s = { .drop_inode = inode_just_drop };
+EOF
+
+# --- files ---------------------------------------------------------------------
+probe HAVE_VMA_SET_FILE <<'EOF'
+static void f(struct vm_area_struct *v, struct file *fl) { vma_set_file(v, fl); }
+EOF
+probe HAVE_VFS_MMAP <<'EOF'
+static int f(struct file *fl, struct vm_area_struct *v) { return vfs_mmap(fl, v); }
+EOF
+probe HAVE_COPY_SPLICE_READ <<'EOF'
+static const struct file_operations fo = { .splice_read = copy_splice_read };
+EOF
+probe HAVE_FMODE_CAN_ODIRECT <<'EOF'
+static fmode_t f(void) { return FMODE_CAN_ODIRECT; }
+EOF
+probe HAVE_NOOP_DIRECT_IO <<'EOF'
+static const struct address_space_operations a = { .direct_IO = noop_direct_IO };
+EOF
+
+JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
+make -C "$KDIR" M="$WORK" -k -j"$JOBS" modules > "${WORK}/build.log" 2>&1 || true
+
+{
+	echo "/* Generated by ./configure for ${KDIR}; do not edit. */"
+	echo "#ifndef OWNFS_CONFIG_H"
+	echo "#define OWNFS_CONFIG_H"
+	for p in $PROBES; do
+		if [ -f "${WORK}/$p.o" ]; then
+			echo "#define $p 1"
+		else
+			echo "/* #undef $p */"
+		fi
+	done
+	echo "#endif"
+} > "${OUT}.tmp"
+
+# A probe failing for an unrelated reason (missing headers, no compiler)
+# would silently select the wrong API; catch the obvious case.
+if ! ls "${WORK}"/*.o >/dev/null 2>&1; then
+	echo "configure: no probe compiled at all; see the log below" >&2
+	tail -n 30 "${WORK}/build.log" >&2
+	rm -f "${OUT}.tmp"
+	exit 1
+fi
+
+mv "${OUT}.tmp" "$OUT"
+grep -c '^#define HAVE_' "$OUT" | sed "s|^|configure: ${KDIR}: |; s|\$| features found|"
+if [ -n "${OWNFS_CONFIGURE_LOG:-}" ]; then
+	cp "${WORK}/build.log" "$OWNFS_CONFIGURE_LOG"
+fi

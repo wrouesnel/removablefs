@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
+obj-m += ownfs.o
+ownfs-y := super.o inode.o namei.o file.o
+ccflags-y += -include $(src)/ownfs_config.h

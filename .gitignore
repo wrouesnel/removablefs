@@ -7,3 +7,13 @@
 *~
 *.swp
 __pycache__/
+# kernel module build output
+*.o
+*.ko
+*.mod
+*.mod.c
+.*.cmd
+Module.symvers
+modules.order
+.tmp_versions/
+/module/ownfs_config.h
