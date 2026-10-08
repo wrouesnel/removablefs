@@ -14,7 +14,9 @@ ubuntu|debian)
     apt-get -y -q dist-upgrade
     apt-get install -y -q build-essential dkms udisks2 attr acl \
         xfsprogs btrfs-progs f2fs-tools e2fsprogs python3 \
-        devscripts debhelper dh-dkms fakeroot
+        devscripts debhelper fakeroot
+    # dh_dkms ships in dkms itself before Ubuntu 24.04.
+    apt-get install -y -q dh-dkms || true
     kver="$(ls -1 /boot/vmlinuz-* | sed 's|.*/vmlinuz-||' | sort -V | tail -1)"
     apt-get install -y -q "linux-headers-${kver}"
     # f2fs and friends live in modules-extra on Ubuntu cloud kernels.
@@ -55,6 +57,21 @@ polkit.addRule(function(action, subject) {
         return polkit.Result.YES;
 });
 EOF
+
+# polkit before 0.106 (Ubuntu 22.04) ignores JavaScript rules.
+if [[ -d /etc/polkit-1/localauthority ]]; then
+    mkdir -p /etc/polkit-1/localauthority/50-local.d
+    cat > /etc/polkit-1/localauthority/50-local.d/10-ownfs-test.pkla <<'EOF'
+# TEST VM ONLY: treat the SSH users alice and bob like an active desktop
+# session for udisks2.
+[ownfs test users may use udisks2]
+Identity=unix-user:alice;unix-user:bob
+Action=org.freedesktop.udisks2.*
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes
+EOF
+fi
 
 if [[ "$(uname -r)" != "$kver" ]]; then
     touch /run/harness-reboot-needed

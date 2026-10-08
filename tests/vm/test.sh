@@ -3,8 +3,9 @@
 # disk and run the functional suite, then a surprise-removal test.
 #
 # Usage: DISTRO=<distro> test.sh [fstype...]    (default: all supported)
-#        MODE=dkms ...   install from the built packages (see packaging
-#                        tests) instead of the source tree
+#        MODE=package ... build the distribution's packages (deb or rpm) in
+#                         the VM and install those, DKMS and all, instead
+#                         of the module from the source tree
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,21 +28,36 @@ if [[ "${MODE:-source}" == source ]]; then
         sudo modprobe -r ownfs 2>/dev/null || true
         d=/lib/modules/$(uname -r)/extra
         sudo mkdir -p $d && sudo cp ownfs/ownfs.ko $d/ && sudo depmod -a'
-    # udisks2 2.10 can be told which driver to use; older ones need the
-    # ID_FS_TYPE rule.
-    rule=85-ownfs.rules
-    uver="$("$V" ssh "dpkg-query -W -f='\${Version}' udisks2 2>/dev/null || rpm -q --qf '%{VERSION}' udisks2")"
-    if [[ "$(printf '%s\n' "$uver" 2.10 | sort -V | head -1)" != 2.10 ]]; then
-        rule=85-ownfs-udisks2.9.rules
-    fi
-    log "udisks2 $uver: installing $rule"
-    "$V" scp "${TOP}/data/udev/${rule}" /tmp/85-ownfs.rules >/dev/null
+    "$V" scp "${TOP}/data/udev/85-ownfs.rules" /tmp/85-ownfs.rules >/dev/null
     "$V" ssh 'sudo install -m 0644 /tmp/85-ownfs.rules /etc/udev/rules.d/85-ownfs.rules && sudo udevadm control --reload'
     if "$V" ssh 'command -v semodule >/dev/null && selinuxenabled'; then
         log "installing SELinux policy"
         "$V" scp "${TOP}/data/selinux/ownfs.cil" /tmp/ownfs.cil >/dev/null
         "$V" ssh 'sudo semodule -i /tmp/ownfs.cil'
     fi
+fi
+
+if [[ "${MODE:-source}" == package ]]; then
+    log "building and installing packages"
+    make -s -C "$TOP" tarball DIST="${TOP}/dist" >/dev/null
+    ver="$(sed -n 's/^Version: *//p' "${TOP}/rpm/ownfs.spec")"
+    "$V" scp "${TOP}/dist/ownfs-${ver}.tar.gz" /tmp/ownfs.tar.gz >/dev/null
+    "$V" ssh "set -e
+        sudo modprobe -r ownfs 2>/dev/null || true
+        sudo rm -f /etc/udev/rules.d/85-ownfs.rules /lib/modules/\$(uname -r)/extra/ownfs.ko
+        sudo depmod -a
+        rm -rf pkg && mkdir pkg && tar -C pkg -xzf /tmp/ownfs.tar.gz && cd pkg/ownfs-${ver}
+        if command -v dpkg-buildpackage >/dev/null; then
+            make deb >/tmp/pkgbuild.log 2>&1 || { tail -30 /tmp/pkgbuild.log; exit 1; }
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q ./dist/*.deb >/tmp/pkginst.log 2>&1 || { tail -30 /tmp/pkginst.log; exit 1; }
+        else
+            make rpm >/tmp/pkgbuild.log 2>&1 || { tail -30 /tmp/pkgbuild.log; exit 1; }
+            sudo dnf -y -q install ./dist/noarch/*.rpm >/tmp/pkginst.log 2>&1 || { tail -30 /tmp/pkginst.log; exit 1; }
+        fi
+        dkms status ownfs
+        modinfo -F filename ownfs
+        ls /usr/lib/udev/rules.d/85-ownfs.rules /lib/udev/rules.d/85-ownfs.rules 2>/dev/null
+        if command -v semodule >/dev/null; then sudo semodule -l | grep -w ownfs; fi"
 fi
 
 "$V" ssh 'rm -rf ownfs-tests && mkdir ownfs-tests'

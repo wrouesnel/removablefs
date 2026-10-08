@@ -1,10 +1,15 @@
 # ownfs: have udisks2 mount removable Linux filesystems through ownfs, so the
 # desktop user owns everything on the drive, as with FAT, exFAT and NTFS.
 #
-# udisks2 (2.10+) reads per-device mount options from UDISKS_MOUNT_OPTIONS_*
-# udev properties: "<sig>_drivers" lists the kernel drivers to try in order
-# and "<sig>:<driver>_defaults" the options for one of them.  If ownfs can't
-# mount the device, udisks2 falls back to the native driver.
+# udisks2 takes a device's filesystem type from ID_FS_TYPE and its mount
+# options from UDISKS_MOUNT_OPTIONS_<TYPE>_* properties, so this rule
+# reports removable ext2/3/4, XFS, btrfs and f2fs devices as type "ownfs"
+# and keeps the real type in OWNFS_LOWER_TYPE, which ownfs gets as lower=.
+# (udisks2 2.10's per-driver options can't be used: they need property names
+# with ':', which systemd 259 and later reject.)
+#
+# The module is loaded first, and only if that works is the device claimed;
+# otherwise it keeps its real type and udisks2 mounts it natively.
 #
 # To opt a device out, set ENV{OWNFS_IGNORE}="1" in an earlier rule.
 
@@ -12,6 +17,7 @@ ACTION=="remove", GOTO="ownfs_end"
 SUBSYSTEM!="block", GOTO="ownfs_end"
 ENV{ID_FS_USAGE}!="filesystem", GOTO="ownfs_end"
 ENV{OWNFS_IGNORE}=="1", GOTO="ownfs_end"
+ENV{ID_FS_TYPE}!="ext2|ext3|ext4|xfs|btrfs|f2fs", GOTO="ownfs_end"
 
 # Removable media only: USB, SD/MMC, FireWire, or a removable-flagged disk.
 # Internal disks keep normal POSIX ownership.
@@ -24,11 +30,10 @@ ATTRS{removable}=="1", GOTO="ownfs_removable"
 GOTO="ownfs_end"
 
 LABEL="ownfs_removable"
-ENV{ID_FS_TYPE}=="ext2", ENV{UDISKS_MOUNT_OPTIONS_EXT2_DRIVERS}="ownfs,ext2", ENV{UDISKS_MOUNT_OPTIONS_EXT2:OWNFS_DEFAULTS}="uid=$$UID,gid=$$GID,lower=ext2", ENV{UDISKS_MOUNT_OPTIONS_EXT2:OWNFS_ALLOW}="uid=$$UID,gid=$$GID,lower=ext2"
-ENV{ID_FS_TYPE}=="ext3", ENV{UDISKS_MOUNT_OPTIONS_EXT3_DRIVERS}="ownfs,ext3", ENV{UDISKS_MOUNT_OPTIONS_EXT3:OWNFS_DEFAULTS}="uid=$$UID,gid=$$GID,lower=ext3", ENV{UDISKS_MOUNT_OPTIONS_EXT3:OWNFS_ALLOW}="uid=$$UID,gid=$$GID,lower=ext3"
-ENV{ID_FS_TYPE}=="ext4", ENV{UDISKS_MOUNT_OPTIONS_EXT4_DRIVERS}="ownfs,ext4", ENV{UDISKS_MOUNT_OPTIONS_EXT4:OWNFS_DEFAULTS}="uid=$$UID,gid=$$GID,lower=ext4", ENV{UDISKS_MOUNT_OPTIONS_EXT4:OWNFS_ALLOW}="uid=$$UID,gid=$$GID,lower=ext4"
-ENV{ID_FS_TYPE}=="xfs", ENV{UDISKS_MOUNT_OPTIONS_XFS_DRIVERS}="ownfs,xfs", ENV{UDISKS_MOUNT_OPTIONS_XFS:OWNFS_DEFAULTS}="uid=$$UID,gid=$$GID,lower=xfs", ENV{UDISKS_MOUNT_OPTIONS_XFS:OWNFS_ALLOW}="uid=$$UID,gid=$$GID,lower=xfs"
-ENV{ID_FS_TYPE}=="btrfs", ENV{UDISKS_MOUNT_OPTIONS_BTRFS_DRIVERS}="ownfs,btrfs", ENV{UDISKS_MOUNT_OPTIONS_BTRFS:OWNFS_DEFAULTS}="uid=$$UID,gid=$$GID,lower=btrfs", ENV{UDISKS_MOUNT_OPTIONS_BTRFS:OWNFS_ALLOW}="uid=$$UID,gid=$$GID,lower=btrfs"
-ENV{ID_FS_TYPE}=="f2fs", ENV{UDISKS_MOUNT_OPTIONS_F2FS_DRIVERS}="ownfs,f2fs", ENV{UDISKS_MOUNT_OPTIONS_F2FS:OWNFS_DEFAULTS}="uid=$$UID,gid=$$GID,lower=f2fs", ENV{UDISKS_MOUNT_OPTIONS_F2FS:OWNFS_ALLOW}="uid=$$UID,gid=$$GID,lower=f2fs"
+PROGRAM!="/sbin/modprobe -q ownfs", GOTO="ownfs_end"
+ENV{OWNFS_LOWER_TYPE}="$env{ID_FS_TYPE}"
+ENV{ID_FS_TYPE}="ownfs"
+ENV{UDISKS_MOUNT_OPTIONS_OWNFS_DEFAULTS}="uid=$$UID,gid=$$GID,lower=$env{OWNFS_LOWER_TYPE}"
+ENV{UDISKS_MOUNT_OPTIONS_OWNFS_ALLOW}="uid=$$UID,gid=$$GID,lower=$env{OWNFS_LOWER_TYPE}"
 
 LABEL="ownfs_end"

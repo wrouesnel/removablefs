@@ -194,7 +194,13 @@ with open(p, 'rb') as f:
     d = f.read()
 assert d[100:105] == b'hello', d[95:110]
 "
-    check_as "$t: O_DIRECT read" alice dd if="$mp/blob" of=/dev/null bs=4096 count=16 iflag=direct status=none
+    # Not dd: uutils dd (Ubuntu 26.04) doesn't align its O_DIRECT buffer.
+    check_as "$t: O_DIRECT read" alice python3 -c "
+import mmap, os
+fd = os.open('$mp/blob', os.O_RDONLY | os.O_DIRECT)
+buf = mmap.mmap(-1, 1 << 16)
+assert os.readv(fd, [buf]) == 1 << 16
+"
     check_as "$t: sendfile/copy_file_range (cp)" alice bash -c "cp '$mp/blob' '$mp/blob2' && cmp '$mp/blob' '$mp/blob2'"
     check_as "$t: fsync" alice python3 -c "import os; fd = os.open('$mp/blob2', os.O_RDWR); os.fsync(fd); os.fdatasync(fd); os.close(fd)"
     check_as "$t: seek SEEK_END" alice python3 -c "

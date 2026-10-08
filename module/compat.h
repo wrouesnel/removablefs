@@ -97,12 +97,10 @@ static inline struct dentry *ownfs_vfs_mkdir(struct inode *dir,
 					     struct dentry *dentry,
 					     umode_t mode)
 {
-#ifdef HAVE_VFS_MKDIR_DENTRY
-#ifdef HAVE_VFS_MKDIR_DELEG
+#if defined(HAVE_VFS_MKDIR_DELEG)
 	return vfs_mkdir(OWNFS_LOWER_NS dir, dentry, mode, NULL);
-#else
+#elif defined(HAVE_VFS_MKDIR_DENTRY)
 	return vfs_mkdir(OWNFS_LOWER_NS dir, dentry, mode);
-#endif
 #else
 	int err = vfs_mkdir(OWNFS_LOWER_NS dir, dentry, mode);
 
