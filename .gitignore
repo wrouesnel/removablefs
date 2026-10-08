@@ -1,0 +1,9 @@
+# VM test harness state (disk images, keys, cloud-init seeds)
+/tests/vm/state/
+*.qcow2
+*.img
+*.iso
+# editor/cache
+*~
+*.swp
+__pycache__/
