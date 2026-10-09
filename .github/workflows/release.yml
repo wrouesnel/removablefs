@@ -3,6 +3,15 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # Builds and signs the PPA source packages for the version in
+  # debian/changelog; uploads them only when asked (e.g. to retry a
+  # release's upload without moving its tag).
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: "Upload to the PPA"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -19,6 +28,7 @@ jobs:
   # repositories below, never as release assets.
   github:
     needs: check
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,6 +40,7 @@ jobs:
     needs: check
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
           - { series: jammy, release: "22.04" }
@@ -42,28 +53,40 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y -q devscripts debhelper dput-ng
       - name: Import signing key
-        run: |
-          echo "$PACKAGE_SIGNING_KEY" | gpg --batch --import
-          echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
-          gpgconf --reload gpg-agent
         env:
           PACKAGE_SIGNING_KEY: ${{ secrets.PACKAGE_SIGNING_KEY }}
-      - name: Build and upload source package
-        run: |
-          version="${GITHUB_REF_NAME#v}~ubuntu${{ matrix.release }}.1"
-          export DEBFULLNAME="Will Rouesnel" DEBEMAIL="wrouesnel@wrouesnel.com"
-          dch -b -v "$version" -D "${{ matrix.series }}" "Release ${GITHUB_REF_NAME#v} for Ubuntu ${{ matrix.release }}."
-          printf '%s' "$PACKAGE_SIGNING_KEY_PASSPHRASE" > "$RUNNER_TEMP/pass"
-          dpkg-buildpackage -S -d -nc \
-            --sign-key="${{ vars.PACKAGE_SIGNING_KEY_FINGERPRINT }}" \
-            --sign-command="gpg --batch --pinentry-mode loopback --passphrase-file $RUNNER_TEMP/pass"
-          rm -f "$RUNNER_TEMP/pass"
-          dput ppa:w-rouesnel/removablefs ../removablefs_${version}_source.changes
-        env:
           PACKAGE_SIGNING_KEY_PASSPHRASE: ${{ secrets.PACKAGE_SIGNING_KEY_PASSPHRASE }}
+          FPR: ${{ vars.PACKAGE_SIGNING_KEY_FINGERPRINT }}
+        run: |
+          [ -n "$PACKAGE_SIGNING_KEY" ] && [ -n "$FPR" ] ||
+            { echo "::error::PACKAGE_SIGNING_KEY or PACKAGE_SIGNING_KEY_FINGERPRINT is not set"; exit 1; }
+          gpg --batch --import <<<"$PACKAGE_SIGNING_KEY"
+          gpg --list-secret-keys "$FPR" >/dev/null
+          # Give gpg-agent the passphrase over stdin, so signing needs no
+          # pinentry and the passphrase never lands in a file.
+          echo allow-preset-passphrase >> ~/.gnupg/gpg-agent.conf
+          gpgconf --kill gpg-agent
+          for grip in $(gpg --with-keygrip --with-colons -K "$FPR" | awk -F: '/^grp/ {print $10}'); do
+            /usr/lib/gnupg/gpg-preset-passphrase --preset "$grip" <<<"$PACKAGE_SIGNING_KEY_PASSPHRASE"
+          done
+          echo "KEYID=$FPR" >> "$GITHUB_ENV"
+      - name: Build and sign source package
+        run: |
+          base="$(dpkg-parsechangelog -S Version)"
+          version="${base}~ubuntu${{ matrix.release }}.1"
+          export DEBFULLNAME="Will Rouesnel" DEBEMAIL="wrouesnel@wrouesnel.com"
+          dch -b -v "$version" -D "${{ matrix.series }}" "Release ${base} for Ubuntu ${{ matrix.release }}."
+          dpkg-buildpackage -S -d -nc -us -uc
+          debsign -k"$KEYID" "../removablefs_${version}_source.changes"
+          gpg --verify "../removablefs_${version}_source.changes"
+          echo "CHANGES=../removablefs_${version}_source.changes" >> "$GITHUB_ENV"
+      - name: Upload to ppa:w-rouesnel/removablefs
+        if: github.event_name == 'push' || inputs.upload
+        run: dput ppa:w-rouesnel/removablefs "$CHANGES"
 
   copr:
     needs: check
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Trigger COPR build
