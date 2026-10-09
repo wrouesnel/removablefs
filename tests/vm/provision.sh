@@ -73,6 +73,37 @@ ResultActive=yes
 EOF
 fi
 
+# Desktop VM: GNOME with alice logged in automatically, NetworkManager
+# managing the NIC as on a real desktop, and no test polkit rules, so
+# mounting goes through the real active-session authorisation.
+if [[ "${DESKTOP:-0}" == 1 ]]; then
+    apt-get install -y -q --no-install-recommends ubuntu-desktop-minimal gdm3 \
+        gnome-shell nautilus gvfs-backends gvfs-daemons network-manager
+    # NetworkManager on Ubuntu only manages what netplan hands it, and a
+    # netplan driver match doesn't carry over, so manage the NIC directly.
+    rm -f /etc/netplan/50-cloud-init.yaml
+    printf '[keyfile]\nunmanaged-devices=none\n' > /etc/NetworkManager/conf.d/99-harness.conf
+    printf '[connection]\nid=harness\ntype=ethernet\nautoconnect=true\n\n[ipv4]\nmethod=auto\n\n[ipv6]\nmethod=auto\n' \
+        > /etc/NetworkManager/system-connections/harness.nmconnection
+    chmod 600 /etc/NetworkManager/system-connections/harness.nmconnection
+    echo 'network: {config: disabled}' > /etc/cloud/cloud.cfg.d/99-harness-no-net.cfg
+    # Never blank or lock: gnome-shell holds automounts while the session
+    # is idle or locked, as it should, and nobody is at this screen.
+    mkdir -p /etc/dconf/profile /etc/dconf/db/local.d
+    printf 'user-db:user\nsystem-db:local\n' > /etc/dconf/profile/user
+    printf '[org/gnome/desktop/session]\nidle-delay=uint32 0\n\n[org/gnome/desktop/screensaver]\nlock-enabled=false\n\n[org/gnome/desktop/lockdown]\ndisable-lock-screen=true\n' \
+        > /etc/dconf/db/local.d/00-harness
+    dconf update
+    sed -i 's/^#\? *AutomaticLoginEnable.*/AutomaticLoginEnable = true/; s/^#\? *AutomaticLogin =.*/AutomaticLogin = alice/' /etc/gdm3/custom.conf
+    passwd -d alice
+    rm -f /etc/polkit-1/rules.d/10-ownfs-test.rules /etc/polkit-1/localauthority/50-local.d/10-ownfs-test.pkla
+    # Skip the first-login welcome wizard.
+    mkdir -p /home/alice/.config && echo yes > /home/alice/.config/gnome-initial-setup-done
+    chown -R alice:alice /home/alice/.config
+    systemctl set-default graphical.target
+    touch /run/harness-reboot-needed
+fi
+
 if [[ "$(uname -r)" != "$kver" ]]; then
     touch /run/harness-reboot-needed
 fi

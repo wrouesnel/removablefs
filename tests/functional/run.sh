@@ -122,6 +122,9 @@ test_fstype() {
     mp="$MP"
 
     check "$t: mounted with ownfs" test "$(findmnt -no FSTYPE "$mp")" = ownfs
+    if [[ "$t" == ext* ]]; then
+        check "$t: errors=remount-ro passed to the lower fs" bash -c "findmnt -no OPTIONS '$mp' | grep -q errors=remount-ro"
+    fi
     check "$t: nosuid,nodev from udisks" bash -c "findmnt -no OPTIONS '$mp' | grep -q nosuid && findmnt -no OPTIONS '$mp' | grep -q nodev"
     check "$t: udisks reports the mount point" bash -c "udisksctl info -b '$DEV' | grep -q 'MountPoints: *$mp'"
     check "$t: mountinfo device matches the drive" test \
@@ -132,6 +135,10 @@ test_fstype() {
         check "$t: stat st_dev matches the drive" test \
             "$(python3 -c 'import os, sys; d = os.stat(sys.argv[1]).st_dev; print("%d:%d" % (os.major(d), os.minor(d)))' "$mp")" = \
             "$(lsblk -dno MAJ:MIN "$DEV" | tr -d ' ')"
+    fi
+
+    if command -v selinuxenabled >/dev/null && selinuxenabled; then
+        check "$t: SELinux labels files dosfs_t" bash -c "stat -c %C '$mp/blob' | grep -q ':dosfs_t:'"
     fi
 
     # --- ownership as presented -----------------------------------------

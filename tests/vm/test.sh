@@ -3,6 +3,8 @@
 # disk and run the functional suite, then a surprise-removal test.
 #
 # Usage: DISTRO=<distro> test.sh [fstype...]    (default: all supported)
+#        STRESS=<seconds> ...  also run tests/functional/stress.py for that
+#                         long on ext4 and xfs (default 60; 0 skips it)
 #        MODE=package ... build the distribution's packages (deb or rpm) in
 #                         the VM and install those, DKMS and all, instead
 #                         of the module from the source tree
@@ -21,47 +23,11 @@ log() { printf '>>> [%s] %s\n' "$DISTRO" "$*"; }
 
 "$V" up >/dev/null
 
-if [[ "${MODE:-source}" == source ]]; then
-    log "building module from source"
-    "${HERE}/sync-build.sh"
-    "$V" ssh 'set -e
-        sudo modprobe -r ownfs 2>/dev/null || true
-        d=/lib/modules/$(uname -r)/extra
-        sudo mkdir -p $d && sudo cp ownfs/ownfs.ko $d/ && sudo depmod -a'
-    "$V" scp "${TOP}/data/udev/85-ownfs.rules" /tmp/85-ownfs.rules >/dev/null
-    "$V" ssh 'sudo install -m 0644 /tmp/85-ownfs.rules /etc/udev/rules.d/85-ownfs.rules && sudo udevadm control --reload'
-    if "$V" ssh 'command -v semodule >/dev/null && selinuxenabled'; then
-        log "installing SELinux policy"
-        "$V" scp "${TOP}/data/selinux/ownfs.cil" /tmp/ownfs.cil >/dev/null
-        "$V" ssh 'sudo semodule -i /tmp/ownfs.cil'
-    fi
-fi
-
-if [[ "${MODE:-source}" == package ]]; then
-    log "building and installing packages"
-    make -s -C "$TOP" tarball DIST="${TOP}/dist" >/dev/null
-    ver="$(sed -n 's/^Version: *//p' "${TOP}/rpm/ownfs.spec")"
-    "$V" scp "${TOP}/dist/ownfs-${ver}.tar.gz" /tmp/ownfs.tar.gz >/dev/null
-    "$V" ssh "set -e
-        sudo modprobe -r ownfs 2>/dev/null || true
-        sudo rm -f /etc/udev/rules.d/85-ownfs.rules /lib/modules/\$(uname -r)/extra/ownfs.ko
-        sudo depmod -a
-        rm -rf pkg && mkdir pkg && tar -C pkg -xzf /tmp/ownfs.tar.gz && cd pkg/ownfs-${ver}
-        if command -v dpkg-buildpackage >/dev/null; then
-            make deb >/tmp/pkgbuild.log 2>&1 || { tail -30 /tmp/pkgbuild.log; exit 1; }
-            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q ./dist/*.deb >/tmp/pkginst.log 2>&1 || { tail -30 /tmp/pkginst.log; exit 1; }
-        else
-            make rpm >/tmp/pkgbuild.log 2>&1 || { tail -30 /tmp/pkgbuild.log; exit 1; }
-            sudo dnf -y -q install ./dist/noarch/*.rpm >/tmp/pkginst.log 2>&1 || { tail -30 /tmp/pkginst.log; exit 1; }
-        fi
-        dkms status ownfs
-        modinfo -F filename ownfs
-        ls /usr/lib/udev/rules.d/85-ownfs.rules /lib/udev/rules.d/85-ownfs.rules 2>/dev/null
-        if command -v semodule >/dev/null; then sudo semodule -l | grep -w ownfs; fi"
-fi
+"${HERE}/install.sh"
 
 "$V" ssh 'rm -rf ownfs-tests && mkdir ownfs-tests'
 "$V" scp "${TOP}/tests/functional/run.sh" ownfs-tests/run.sh >/dev/null
+"$V" scp "${TOP}/tests/functional/stress.py" ownfs-tests/stress.py >/dev/null
 
 "$V" unplug "$DISK" 2>/dev/null || true
 "$V" mkdisk "$DISK" 512M >/dev/null
@@ -77,6 +43,33 @@ log "USB disk is $dev; running functional tests (${FSTYPES[*]})"
 
 rc=0
 "$V" ssh "sudo bash ownfs-tests/run.sh $dev ${FSTYPES[*]}" || rc=$?
+
+# Concurrency: racing workers on a udisks2 mount, then fsck and the log.
+STRESS="${STRESS:-60}"
+if [[ "$STRESS" -gt 0 ]]; then
+    for fs in ext4 xfs; do
+        log "stress: $fs for ${STRESS}s"
+        if "$V" ssh "set -e
+            sudo dmesg -C
+            sudo wipefs -aq $dev; sudo mkfs.$fs -q -f $dev 2>/dev/null || sudo mkfs.$fs -q -F $dev
+            sudo udevadm settle; sudo udevadm trigger -w --action=change $dev 2>/dev/null || sudo udevadm trigger --action=change $dev; sudo udevadm settle
+            out=\$(sudo -u alice udisksctl mount -b $dev); mp=\${out##* at }; mp=\${mp%.}
+            sudo install -m 0644 ownfs-tests/stress.py /tmp/ownfs-stress.py
+            st=0; cd /tmp; sudo -u alice python3 /tmp/ownfs-stress.py \$mp $STRESS 8 || st=\$?
+            sudo -u alice udisksctl unmount -b $dev
+            test \$st -eq 0
+            case $fs in ext4) sudo e2fsck -fn $dev >/dev/null ;; xfs) sudo xfs_repair -n $dev >/dev/null 2>&1 ;; esac
+            ! sudo dmesg | grep -E -q 'WARNING:|BUG:|Oops|general protection|KASAN|circular locking|possible recursive|inconsistent lock'
+            "; then
+            echo "  ok    stress: $fs"
+        else
+            echo "  FAIL  stress: $fs"
+            "$V" ssh "for m in \$(findmnt -rn -S $dev -o TARGET); do sudo umount -l \$m; done" || true
+            "$V" ssh 'sudo dmesg | grep -E -A40 "WARNING:|BUG:|Oops|KASAN|circular locking|possible recursive|inconsistent lock" | head -80'
+            rc=1
+        fi
+    done
+fi
 
 # Surprise removal: unplug while mounted with an open file and a writer.
 log "surprise removal"

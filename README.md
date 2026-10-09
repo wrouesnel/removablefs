@@ -152,17 +152,34 @@ Tests run in throwaway VMs under libvirt's `qemu:///session` (see
 USB disks hot-plugged into it.
 
 ```sh
-DISTRO=noble tests/vm/test.sh          # build, install, run the suite
-DISTRO=alma9 tests/vm/test.sh ext4 xfs
+DISTRO=noble tests/vm/test.sh                 # build, install, run the suite
+DISTRO=alma9 MODE=package tests/vm/test.sh    # the same, from the deb/rpm packages
+DISTRO=alma9 STRESS=300 tests/vm/test.sh ext4 # longer concurrency stress
+tests/vm/desktop-test.sh                      # GNOME automount and eject, end to end
 tests/vm/vm.sh list
 ```
 
-The suite (`tests/functional/run.sh`) formats the disk as if it came from
-another machine, then mounts it through udisks2 as an unprivileged desktop
-user. It exercises reads, writes, mmap, renames, links, xattrs and the
-permission policy, checks what landed on disk, runs fsck, and fails on any
-kernel warning. A final test pulls the disk out while it's mounted and being
-written to.
+The functional suite (`tests/functional/run.sh`):
+
+- formats the disk as if it came from another machine;
+- mounts it through udisks2 as an unprivileged desktop user;
+- exercises reads, writes, mmap, O_DIRECT, renames (including
+  `RENAME_EXCHANGE`), links, xattrs and the permission policy;
+- checks what landed on disk, runs fsck, and fails on any kernel warning.
+
+After the suite:
+
+- `tests/functional/stress.py` races workers over the same names for a while
+  (`STRESS=` seconds, default 60);
+- a final test pulls the disk out while it's mounted and being written to.
+
+On AlmaLinux 9 the suite and stress also run on the RHEL debug kernel (KASAN
+and lockdep) without reports.
+
+`tests/vm/desktop-test.sh` boots Ubuntu 24.04 with GNOME and alice logged
+in, with no test-only polkit rules. It plugs in a drive owned by uid 1000,
+waits for GNOME to automount it, checks that alice owns everything, then
+ejects it through gvfs, as the eject button in Files does.
 
 ## Licence
 
