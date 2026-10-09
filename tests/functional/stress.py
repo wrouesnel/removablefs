@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Concurrent filesystem stress for ownfs.
+"""Concurrent filesystem stress for removablefs.
 
 Usage: stress.py <directory> [seconds] [workers]
 

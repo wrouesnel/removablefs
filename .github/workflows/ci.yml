@@ -49,8 +49,8 @@ jobs:
           kdir="$(ls -d /usr/src/kernels/* /usr/src/linux-headers-*-generic 2>/dev/null | sort -V | tail -1)"
           echo "building against $kdir"
           make -C module KDIR="$kdir" KCFLAGS=-Werror
-          cat module/ownfs_config.h
-          modinfo module/ownfs.ko
+          cat module/removablefs_config.h
+          modinfo module/removablefs.ko
 
   deb:
     name: deb (${{ matrix.image }})
@@ -73,7 +73,7 @@ jobs:
         run: |
           DEBIAN_FRONTEND=noninteractive apt-get install -y -q linux-headers-generic ./dist/*.deb
           kver="$(ls /lib/modules | sort -V | tail -1)"
-          dkms build -m ownfs -v "$(sed -n 's/^Version: *//p' rpm/ownfs.spec)" -k "$kver"
+          dkms build -m removablefs -v "$(sed -n 's/^Version: *//p' rpm/removablefs.spec)" -k "$kver"
           dkms status
       - uses: actions/upload-artifact@v4
         with:
@@ -102,7 +102,7 @@ jobs:
           dnf -y -q install kernel-devel
           dnf -y -q install dist/noarch/*.rpm
           kver="$(ls /usr/src/kernels | sort -V | tail -1)"
-          dkms build -m ownfs -v "$(sed -n 's/^Version: *//p' rpm/ownfs.spec)" -k "$kver"
+          dkms build -m removablefs -v "$(sed -n 's/^Version: *//p' rpm/removablefs.spec)" -k "$kver"
           dkms status
       - uses: actions/upload-artifact@v4
         with:

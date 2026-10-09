@@ -1,15 +1,15 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Kernel API compatibility for ownfs.
+ * Kernel API compatibility for removablefs.
  *
  * Distribution kernels (RHEL above all) backport VFS changes without
  * changing their version number, so every difference handled here is
  * detected by compiling a probe against the target kernel's headers (see
  * ./configure), never by LINUX_VERSION_CODE.  The probes write
- * ownfs_config.h, which the build force-includes ahead of this file.
+ * removablefs_config.h, which the build force-includes ahead of this file.
  */
-#ifndef OWNFS_COMPAT_H
-#define OWNFS_COMPAT_H
+#ifndef REMOVABLEFS_COMPAT_H
+#define REMOVABLEFS_COMPAT_H
 
 #include <linux/fs.h>
 #include <linux/namei.h>
@@ -20,51 +20,51 @@
 
 /*
  * Inode operations take an idmap (6.3+), a user namespace (5.12+) or
- * nothing.  OWNFS_IOP_NS_DECL declares that leading argument in our own
- * callbacks and OWNFS_IOP_NS passes it on to helpers acting on our inodes.
+ * nothing.  REMOVABLEFS_IOP_NS_DECL declares that leading argument in our own
+ * callbacks and REMOVABLEFS_IOP_NS passes it on to helpers acting on our inodes.
  */
 #if defined(HAVE_IOP_IDMAP)
-#define OWNFS_IOP_NS_DECL	struct mnt_idmap *ownfs_ns,
-#define OWNFS_IOP_NS		ownfs_ns,
+#define REMOVABLEFS_IOP_NS_DECL	struct mnt_idmap *removablefs_ns,
+#define REMOVABLEFS_IOP_NS		removablefs_ns,
 #elif defined(HAVE_IOP_USERNS)
-#define OWNFS_IOP_NS_DECL	struct user_namespace *ownfs_ns,
-#define OWNFS_IOP_NS		ownfs_ns,
+#define REMOVABLEFS_IOP_NS_DECL	struct user_namespace *removablefs_ns,
+#define REMOVABLEFS_IOP_NS		removablefs_ns,
 #else
-#define OWNFS_IOP_NS_DECL
-#define OWNFS_IOP_NS
+#define REMOVABLEFS_IOP_NS_DECL
+#define REMOVABLEFS_IOP_NS
 #endif
 
 /* The matching leading argument for vfs_*() calls on the lower fs. */
 #if defined(HAVE_VFS_IDMAP)
-#define OWNFS_LOWER_NS		&nop_mnt_idmap,
+#define REMOVABLEFS_LOWER_NS		&nop_mnt_idmap,
 #elif defined(HAVE_VFS_USERNS)
-#define OWNFS_LOWER_NS		&init_user_ns,
+#define REMOVABLEFS_LOWER_NS		&init_user_ns,
 #else
-#define OWNFS_LOWER_NS
+#define REMOVABLEFS_LOWER_NS
 #endif
 
-#define OWNFS_IOP_GETATTR_DECL(name) \
-	int name(OWNFS_IOP_NS_DECL const struct path *path, \
+#define REMOVABLEFS_IOP_GETATTR_DECL(name) \
+	int name(REMOVABLEFS_IOP_NS_DECL const struct path *path, \
 		 struct kstat *stat, u32 request_mask, unsigned int flags)
-#define OWNFS_IOP_SETATTR_DECL(name) \
-	int name(OWNFS_IOP_NS_DECL struct dentry *dentry, struct iattr *attr)
+#define REMOVABLEFS_IOP_SETATTR_DECL(name) \
+	int name(REMOVABLEFS_IOP_NS_DECL struct dentry *dentry, struct iattr *attr)
 
 #ifdef HAVE_IOP_MKDIR_DENTRY
-typedef struct dentry *ownfs_mkdir_ret_t;
-#define OWNFS_MKDIR_RET(err)	((err) ? ERR_PTR(err) : NULL)
+typedef struct dentry *removablefs_mkdir_ret_t;
+#define REMOVABLEFS_MKDIR_RET(err)	((err) ? ERR_PTR(err) : NULL)
 #else
-typedef int ownfs_mkdir_ret_t;
-#define OWNFS_MKDIR_RET(err)	(err)
+typedef int removablefs_mkdir_ret_t;
+#define REMOVABLEFS_MKDIR_RET(err)	(err)
 #endif
 
 /*
  * Lower-filesystem lookups.  lookup_noperm*() (6.15+) store the name's hash,
  * salted for @base, into the qstr they are given, so they must never see an
- * ownfs dentry's d_name: rewriting the hash of a hashed dentry corrupts the
+ * removablefs dentry's d_name: rewriting the hash of a hashed dentry corrupts the
  * dcache.  Hand them a copy.
  */
-static inline struct dentry *ownfs_lookup_locked(struct dentry *base,
-						 const struct qstr *name)
+static inline struct dentry *removablefs_lookup_locked(struct dentry *base,
+						       const struct qstr *name)
 {
 #if defined(HAVE_LOOKUP_NOPERM)
 	struct qstr q = QSTR_INIT(name->name, name->len);
@@ -76,8 +76,8 @@ static inline struct dentry *ownfs_lookup_locked(struct dentry *base,
 }
 
 /* The same, for when the caller doesn't hold the parent locked. */
-static inline struct dentry *ownfs_lookup_unlocked(struct dentry *base,
-						   const struct qstr *name)
+static inline struct dentry *removablefs_lookup_unlocked(struct dentry *base,
+							 const struct qstr *name)
 {
 #if defined(HAVE_LOOKUP_NOPERM)
 	struct qstr q = QSTR_INIT(name->name, name->len);
@@ -88,13 +88,13 @@ static inline struct dentry *ownfs_lookup_unlocked(struct dentry *base,
 #endif
 }
 
-static inline int ownfs_vfs_create(struct inode *dir, struct dentry *dentry,
-				   umode_t mode)
+static inline int removablefs_vfs_create(struct inode *dir, struct dentry *dentry,
+					 umode_t mode)
 {
 #ifdef HAVE_VFS_CREATE_NO_EXCL
-	return vfs_create(OWNFS_LOWER_NS dentry, mode, NULL);
+	return vfs_create(REMOVABLEFS_LOWER_NS dentry, mode, NULL);
 #else
-	return vfs_create(OWNFS_LOWER_NS dir, dentry, mode, true);
+	return vfs_create(REMOVABLEFS_LOWER_NS dir, dentry, mode, true);
 #endif
 }
 
@@ -103,26 +103,26 @@ static inline int ownfs_vfs_create(struct inode *dir, struct dentry *dentry,
  * from @dentry.  @dentry's reference is consumed either way, as with the
  * 6.15+ vfs_mkdir().
  */
-static inline struct dentry *ownfs_vfs_mkdir(struct inode *dir,
-					     struct dentry *dentry,
-					     umode_t mode)
+static inline struct dentry *removablefs_vfs_mkdir(struct inode *dir,
+						   struct dentry *dentry,
+						   umode_t mode)
 {
 #if defined(HAVE_VFS_MKDIR_DELEG)
 	/*
 	 * Since 6.19 (the release that added the delegated_inode argument)
 	 * a failing vfs_mkdir() also unlocks @dir via end_creating().  Take
-	 * the lock again so that, as with every other ownfs_vfs_*(), the
+	 * the lock again so that, as with every other removablefs_vfs_*(), the
 	 * caller still holds it afterwards.
 	 */
-	struct dentry *de = vfs_mkdir(OWNFS_LOWER_NS dir, dentry, mode, NULL);
+	struct dentry *de = vfs_mkdir(REMOVABLEFS_LOWER_NS dir, dentry, mode, NULL);
 
 	if (IS_ERR(de))
 		inode_lock_nested(dir, I_MUTEX_PARENT);
 	return de;
 #elif defined(HAVE_VFS_MKDIR_DENTRY)
-	return vfs_mkdir(OWNFS_LOWER_NS dir, dentry, mode);
+	return vfs_mkdir(REMOVABLEFS_LOWER_NS dir, dentry, mode);
 #else
-	int err = vfs_mkdir(OWNFS_LOWER_NS dir, dentry, mode);
+	int err = vfs_mkdir(REMOVABLEFS_LOWER_NS dir, dentry, mode);
 
 	if (err) {
 		dput(dentry);
@@ -132,53 +132,53 @@ static inline struct dentry *ownfs_vfs_mkdir(struct inode *dir,
 #endif
 }
 
-static inline int ownfs_vfs_mknod(struct inode *dir, struct dentry *dentry,
-				  umode_t mode, dev_t dev)
+static inline int removablefs_vfs_mknod(struct inode *dir, struct dentry *dentry,
+					umode_t mode, dev_t dev)
 {
 #ifdef HAVE_VFS_MKNOD_DELEG
-	return vfs_mknod(OWNFS_LOWER_NS dir, dentry, mode, dev, NULL);
+	return vfs_mknod(REMOVABLEFS_LOWER_NS dir, dentry, mode, dev, NULL);
 #else
-	return vfs_mknod(OWNFS_LOWER_NS dir, dentry, mode, dev);
+	return vfs_mknod(REMOVABLEFS_LOWER_NS dir, dentry, mode, dev);
 #endif
 }
 
-static inline int ownfs_vfs_symlink(struct inode *dir, struct dentry *dentry,
-				    const char *target)
+static inline int removablefs_vfs_symlink(struct inode *dir, struct dentry *dentry,
+					  const char *target)
 {
 #ifdef HAVE_VFS_SYMLINK_DELEG
-	return vfs_symlink(OWNFS_LOWER_NS dir, dentry, target, NULL);
+	return vfs_symlink(REMOVABLEFS_LOWER_NS dir, dentry, target, NULL);
 #else
-	return vfs_symlink(OWNFS_LOWER_NS dir, dentry, target);
+	return vfs_symlink(REMOVABLEFS_LOWER_NS dir, dentry, target);
 #endif
 }
 
-static inline int ownfs_vfs_link(struct dentry *old, struct inode *dir,
-				 struct dentry *new)
+static inline int removablefs_vfs_link(struct dentry *old, struct inode *dir,
+				       struct dentry *new)
 {
 #if defined(HAVE_VFS_IDMAP) || defined(HAVE_VFS_USERNS)
-	return vfs_link(old, OWNFS_LOWER_NS dir, new, NULL);
+	return vfs_link(old, REMOVABLEFS_LOWER_NS dir, new, NULL);
 #else
 	return vfs_link(old, dir, new, NULL);
 #endif
 }
 
-static inline int ownfs_vfs_unlink(struct inode *dir, struct dentry *dentry)
+static inline int removablefs_vfs_unlink(struct inode *dir, struct dentry *dentry)
 {
-	return vfs_unlink(OWNFS_LOWER_NS dir, dentry, NULL);
+	return vfs_unlink(REMOVABLEFS_LOWER_NS dir, dentry, NULL);
 }
 
-static inline int ownfs_vfs_rmdir(struct inode *dir, struct dentry *dentry)
+static inline int removablefs_vfs_rmdir(struct inode *dir, struct dentry *dentry)
 {
 #ifdef HAVE_VFS_RMDIR_DELEG
-	return vfs_rmdir(OWNFS_LOWER_NS dir, dentry, NULL);
+	return vfs_rmdir(REMOVABLEFS_LOWER_NS dir, dentry, NULL);
 #else
-	return vfs_rmdir(OWNFS_LOWER_NS dir, dentry);
+	return vfs_rmdir(REMOVABLEFS_LOWER_NS dir, dentry);
 #endif
 }
 
-static inline int ownfs_vfs_rename(struct inode *old_dir, struct dentry *old,
-				   struct inode *new_dir, struct dentry *new,
-				   unsigned int flags)
+static inline int removablefs_vfs_rename(struct inode *old_dir, struct dentry *old,
+					 struct inode *new_dir, struct dentry *new,
+					 unsigned int flags)
 {
 #if defined(HAVE_RENAMEDATA_PARENT)
 	struct renamedata rd = {
@@ -213,49 +213,49 @@ static inline int ownfs_vfs_rename(struct inode *old_dir, struct dentry *old,
 #endif
 }
 
-static inline int ownfs_notify_change(struct dentry *dentry,
-				      struct iattr *attr)
+static inline int removablefs_notify_change(struct dentry *dentry,
+					    struct iattr *attr)
 {
-	return notify_change(OWNFS_LOWER_NS dentry, attr, NULL);
+	return notify_change(REMOVABLEFS_LOWER_NS dentry, attr, NULL);
 }
 
-static inline ssize_t ownfs_vfs_getxattr(struct dentry *dentry,
-					 const char *name, void *value,
-					 size_t size)
+static inline ssize_t removablefs_vfs_getxattr(struct dentry *dentry,
+					       const char *name, void *value,
+					       size_t size)
 {
-	return vfs_getxattr(OWNFS_LOWER_NS dentry, name, value, size);
+	return vfs_getxattr(REMOVABLEFS_LOWER_NS dentry, name, value, size);
 }
 
-static inline int ownfs_vfs_setxattr(struct dentry *dentry, const char *name,
-				     const void *value, size_t size, int flags)
+static inline int removablefs_vfs_setxattr(struct dentry *dentry, const char *name,
+					   const void *value, size_t size, int flags)
 {
-	return vfs_setxattr(OWNFS_LOWER_NS dentry, name, value, size, flags);
+	return vfs_setxattr(REMOVABLEFS_LOWER_NS dentry, name, value, size, flags);
 }
 
-static inline int ownfs_vfs_removexattr(struct dentry *dentry,
-					const char *name)
+static inline int removablefs_vfs_removexattr(struct dentry *dentry,
+					      const char *name)
 {
-	return vfs_removexattr(OWNFS_LOWER_NS dentry, name);
+	return vfs_removexattr(REMOVABLEFS_LOWER_NS dentry, name);
 }
 
-static inline int ownfs_setattr_prepare(OWNFS_IOP_NS_DECL
-					struct dentry *dentry,
-					struct iattr *attr)
+static inline int removablefs_setattr_prepare(REMOVABLEFS_IOP_NS_DECL
+					      struct dentry *dentry,
+					      struct iattr *attr)
 {
-	return setattr_prepare(OWNFS_IOP_NS dentry, attr);
+	return setattr_prepare(REMOVABLEFS_IOP_NS dentry, attr);
 }
 
 /* xattr handler ->set() */
 #if defined(HAVE_XATTR_SET_IDMAP)
-#define OWNFS_XATTR_SET_NS_DECL	struct mnt_idmap *ownfs_ns,
+#define REMOVABLEFS_XATTR_SET_NS_DECL	struct mnt_idmap *removablefs_ns,
 #elif defined(HAVE_XATTR_SET_USERNS)
-#define OWNFS_XATTR_SET_NS_DECL	struct user_namespace *ownfs_ns,
+#define REMOVABLEFS_XATTR_SET_NS_DECL	struct user_namespace *removablefs_ns,
 #else
-#define OWNFS_XATTR_SET_NS_DECL
+#define REMOVABLEFS_XATTR_SET_NS_DECL
 #endif
 
 /* Inode timestamps moved behind accessors in 6.6 (ctime) and 6.7. */
-static inline void ownfs_copy_times(struct inode *dst, const struct inode *src)
+static inline void removablefs_copy_times(struct inode *dst, const struct inode *src)
 {
 #ifdef HAVE_INODE_GET_MTIME
 	inode_set_atime_to_ts(dst, inode_get_atime(src));
@@ -271,8 +271,8 @@ static inline void ownfs_copy_times(struct inode *dst, const struct inode *src)
 #endif
 }
 
-static inline void ownfs_set_default_d_op(struct super_block *sb,
-					  const struct dentry_operations *op)
+static inline void removablefs_set_default_d_op(struct super_block *sb,
+						const struct dentry_operations *op)
 {
 #ifdef HAVE_SET_DEFAULT_D_OP
 	set_default_d_op(sb, op);
@@ -281,7 +281,7 @@ static inline void ownfs_set_default_d_op(struct super_block *sb,
 #endif
 }
 
-static inline bool ownfs_inode_is_new(struct inode *inode)
+static inline bool removablefs_inode_is_new(struct inode *inode)
 {
 #ifdef HAVE_INODE_STATE_READ_ONCE
 	return inode_state_read_once(inode) & I_NEW;
@@ -290,8 +290,8 @@ static inline bool ownfs_inode_is_new(struct inode *inode)
 #endif
 }
 
-static inline void ownfs_vma_set_file(struct vm_area_struct *vma,
-				      struct file *file)
+static inline void removablefs_vma_set_file(struct vm_area_struct *vma,
+					    struct file *file)
 {
 #ifdef HAVE_VMA_SET_FILE
 	vma_set_file(vma, file);
@@ -302,7 +302,7 @@ static inline void ownfs_vma_set_file(struct vm_area_struct *vma,
 #endif
 }
 
-static inline int ownfs_call_mmap(struct file *file, struct vm_area_struct *vma)
+static inline int removablefs_call_mmap(struct file *file, struct vm_area_struct *vma)
 {
 #if defined(HAVE_VFS_MMAP)
 	return vfs_mmap(file, vma);
@@ -313,4 +313,4 @@ static inline int ownfs_call_mmap(struct file *file, struct vm_area_struct *vma)
 #endif
 }
 
-#endif /* OWNFS_COMPAT_H */
+#endif /* REMOVABLEFS_COMPAT_H */

@@ -1,5 +1,6 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
-Upstream-Name: ownfs
+Upstream-Name: removablefs
+Source: https://github.com/wrouesnel/removablefs
 
 Files: *
 Copyright: 2026 Will Rouesnel <wrouesnel@wrouesnel.com>

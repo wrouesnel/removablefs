@@ -5,14 +5,14 @@ KDIR ?= /lib/modules/$(KVER)/build
 
 all: modules
 
-ownfs_config.h: configure
+removablefs_config.h: configure
 	./configure $(KDIR)
 
-modules: ownfs_config.h
+modules: removablefs_config.h
 	$(MAKE) -C $(KDIR) M=$(CURDIR) modules
 
 clean:
 	$(MAKE) -C $(KDIR) M=$(CURDIR) clean
-	rm -f ownfs_config.h
+	rm -f removablefs_config.h
 
 .PHONY: all modules clean

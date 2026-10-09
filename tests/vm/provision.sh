@@ -48,7 +48,7 @@ esac
 # Let the SSH-logged-in test users act like an active desktop session.
 # TEST VMS ONLY.
 mkdir -p /etc/polkit-1/rules.d
-cat > /etc/polkit-1/rules.d/10-ownfs-test.rules <<'EOF'
+cat > /etc/polkit-1/rules.d/10-removablefs-test.rules <<'EOF'
 // TEST VM ONLY: treat the SSH users alice and bob like an active desktop
 // session for udisks2 mount, unmount, eject and power-off.
 polkit.addRule(function(action, subject) {
@@ -61,10 +61,10 @@ EOF
 # polkit before 0.106 (Ubuntu 22.04) ignores JavaScript rules.
 if [[ -d /etc/polkit-1/localauthority ]]; then
     mkdir -p /etc/polkit-1/localauthority/50-local.d
-    cat > /etc/polkit-1/localauthority/50-local.d/10-ownfs-test.pkla <<'EOF'
+    cat > /etc/polkit-1/localauthority/50-local.d/10-removablefs-test.pkla <<'EOF'
 # TEST VM ONLY: treat the SSH users alice and bob like an active desktop
 # session for udisks2.
-[ownfs test users may use udisks2]
+[removablefs test users may use udisks2]
 Identity=unix-user:alice;unix-user:bob
 Action=org.freedesktop.udisks2.*
 ResultAny=yes
@@ -96,7 +96,7 @@ if [[ "${DESKTOP:-0}" == 1 ]]; then
     dconf update
     sed -i 's/^#\? *AutomaticLoginEnable.*/AutomaticLoginEnable = true/; s/^#\? *AutomaticLogin =.*/AutomaticLogin = alice/' /etc/gdm3/custom.conf
     passwd -d alice
-    rm -f /etc/polkit-1/rules.d/10-ownfs-test.rules /etc/polkit-1/localauthority/50-local.d/10-ownfs-test.pkla
+    rm -f /etc/polkit-1/rules.d/10-removablefs-test.rules /etc/polkit-1/localauthority/50-local.d/10-removablefs-test.pkla
     # Skip the first-login welcome wizard.
     mkdir -p /home/alice/.config && echo yes > /home/alice/.config/gnome-initial-setup-done
     chown -R alice:alice /home/alice/.config

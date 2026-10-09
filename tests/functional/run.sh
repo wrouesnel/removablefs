@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Functional tests for ownfs + udisks2, run as root inside a test VM.
+# Functional tests for removablefs + udisks2, run as root inside a test VM.
 #
 # Usage: run.sh <block device> <fstype>...
 #
@@ -17,7 +17,7 @@ shift
 FSTYPES=("$@")
 [[ ${#FSTYPES[@]} -gt 0 ]] || FSTYPES=(ext4)
 
-RAW=/mnt/ownfs-raw
+RAW=/mnt/removablefs-raw
 FAILS=0
 PASSES=0
 SKIPS=0
@@ -71,7 +71,7 @@ populate() {
     chown 1000:1000 "$RAW/script.sh"; chmod 0755 "$RAW/script.sh"
     dd if=/dev/urandom of="$RAW/blob" bs=1M count=8 status=none
     chown 1000:1000 "$RAW/blob"
-    sha256sum "$RAW/blob" | cut -d' ' -f1 > /tmp/ownfs-blob.sha
+    sha256sum "$RAW/blob" | cut -d' ' -f1 > /tmp/removablefs-blob.sha
     umount "$RAW"
 }
 
@@ -86,7 +86,7 @@ udisks_mount() {
     if [[ "$out" != Mounted* ]]; then
         echo "$out" >&2
         udisksctl info -b "$DEV" | grep -E 'IdType|IdUsage|UDisks2.Filesystem' >&2
-        udevadm info "$DEV" | grep -E 'ID_FS_TYPE|ID_FS_USAGE|OWNFS' >&2
+        udevadm info "$DEV" | grep -E 'ID_FS_TYPE|ID_FS_USAGE|REMOVABLEFS' >&2
         return 1
     fi
     # "Mounted /dev/sdb at /media/alice/LABEL"
@@ -121,7 +121,7 @@ test_fstype() {
     pass "$t: udisksctl mount as alice at $MP"
     mp="$MP"
 
-    check "$t: mounted with ownfs" test "$(findmnt -no FSTYPE "$mp")" = ownfs
+    check "$t: mounted with removablefs" test "$(findmnt -no FSTYPE "$mp")" = removablefs
     if [[ "$t" == ext* ]]; then
         check "$t: errors=remount-ro passed to the lower fs" bash -c "findmnt -no OPTIONS '$mp' | grep -q errors=remount-ro"
     fi
@@ -149,7 +149,7 @@ test_fstype() {
     check_as "$t: alice reads uid-1234 file in 0700 dir" alice cat "$mp/stranger/file"
     check_as "$t: alice writes into uid-1234 0700 dir" alice touch "$mp/stranger/mine"
     check_as "$t: alice appends to root-owned file" alice bash -c "echo more >> '$mp/rootfile'"
-    check "$t: blob intact" test "$(as alice sha256sum "$mp/blob" | cut -d' ' -f1)" = "$(cat /tmp/ownfs-blob.sha)"
+    check "$t: blob intact" test "$(as alice sha256sum "$mp/blob" | cut -d' ' -f1)" = "$(cat /tmp/removablefs-blob.sha)"
     if findmnt -no OPTIONS "$mp" | grep -q noexec; then
         skip "$t: exec (mounted noexec)"
     else
@@ -244,22 +244,22 @@ import os; fd = os.open('$mp/blob2', os.O_RDONLY); assert os.lseek(fd, 0, os.SEE
         "test \"\$(stat -c %u:%g '$RAW/ap' '$RAW/stranger/mine' '$RAW/blob2' '$RAW/sg' | sort -u)\" = 1000:1000"
     check "$t: existing owners untouched" test "$(stat -c %u "$RAW/stranger/file") $(stat -c %u "$RAW/rootfile")" = "1234 0"
     check "$t: no setuid/setgid files on disk" bash -c "test -z \"\$(find '$RAW' -type f -perm /6000)\""
-    check "$t: data written through ownfs readable natively" bash -c "cmp '$RAW/blob' '$RAW/blob2' && test \"\$(cat '$RAW/rootfile')\" = \$'root\nmore'"
+    check "$t: data written through removablefs readable natively" bash -c "cmp '$RAW/blob' '$RAW/blob2' && test \"\$(cat '$RAW/rootfile')\" = \$'root\nmore'"
     umount "$RAW"
 
     # --- other users, on a mount bob can reach (/media/alice is private) -------
-    mkdir -p /mnt/ownfs-shared
-    if mount -t ownfs -o "uid=1001,gid=1001,lower=$t" "$DEV" /mnt/ownfs-shared; then
-        mp=/mnt/ownfs-shared
+    mkdir -p /mnt/removablefs-shared
+    if mount -t removablefs -o "uid=1001,gid=1001,lower=$t" "$DEV" /mnt/removablefs-shared; then
+        mp=/mnt/removablefs-shared
         check_as "$t: bob reads a world-readable file" bob cat "$mp/rootfile"
         check_not_as "$t: bob cannot create in alice's 0755 root" bob touch "$mp/bob"
         check_not_as "$t: bob cannot read a 0600 file" bob cat "$mp/private/notes.txt"
         check_not_as "$t: bob cannot chmod" bob chmod 777 "$mp/rootfile"
         check_not_as "$t: bob cannot delete" bob rm -f "$mp/rootfile"
         check "$t: root can still do everything" bash -c "touch '$mp/rootmade' && rm '$mp/rootmade'"
-        umount /mnt/ownfs-shared
+        umount /mnt/removablefs-shared
     else
-        fail "$t: manual mount -t ownfs"
+        fail "$t: manual mount -t removablefs"
     fi
 }
 

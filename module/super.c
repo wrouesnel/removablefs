@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * ownfs superblock, mount options and module setup.
+ * removablefs superblock, mount options and module setup.
  *
  * Mount options:
  *   uid=N, gid=N         owner presented for every file (default: mounter)
@@ -26,18 +26,18 @@
 #include <linux/fs_context.h>
 #endif
 
-#include "ownfs.h"
+#include "removablefs.h"
 
-#define OWNFS_VERSION "0.1.0"
+#define REMOVABLEFS_VERSION "0.1.0"
 
-static const struct super_operations ownfs_sops;
+static const struct super_operations removablefs_sops;
 
 /* Tried in order when lower= is not given. */
-static const char *const ownfs_probe_types[] = {
+static const char *const removablefs_probe_types[] = {
 	"ext4", "xfs", "btrfs", "f2fs", NULL
 };
 
-static void ownfs_free_opts(struct ownfs_mount_opts *o)
+static void removablefs_free_opts(struct removablefs_mount_opts *o)
 {
 	kfree(o->source);
 	kfree(o->lower_type);
@@ -45,8 +45,8 @@ static void ownfs_free_opts(struct ownfs_mount_opts *o)
 	memset(o, 0, sizeof(*o));
 }
 
-static int ownfs_append_lower(struct ownfs_mount_opts *o, const char *key,
-			      const char *val)
+static int removablefs_append_lower(struct removablefs_mount_opts *o, const char *key,
+				    const char *val)
 {
 	size_t need = strlen(key) + (val ? strlen(val) + 1 : 0) + 2;
 	size_t used = o->lower_data ? strlen(o->lower_data) : 0;
@@ -73,7 +73,7 @@ static int ownfs_append_lower(struct ownfs_mount_opts *o, const char *key,
 	return 0;
 }
 
-static int ownfs_parse_id(const char *val, u32 *out)
+static int removablefs_parse_id(const char *val, u32 *out)
 {
 	if (!val || !*val)
 		return -EINVAL;
@@ -81,8 +81,8 @@ static int ownfs_parse_id(const char *val, u32 *out)
 }
 
 /* One option, already split at '='.  @val is NULL for flags. */
-static int ownfs_parse_opt(struct ownfs_mount_opts *o, const char *key,
-			   const char *val)
+static int removablefs_parse_opt(struct removablefs_mount_opts *o, const char *key,
+				 const char *val)
 {
 	struct user_namespace *ns = current_user_ns();
 	u32 id;
@@ -91,7 +91,7 @@ static int ownfs_parse_opt(struct ownfs_mount_opts *o, const char *key,
 	if (!strcmp(key, "uid") || !strcmp(key, "diskuid")) {
 		kuid_t uid;
 
-		err = ownfs_parse_id(val, &id);
+		err = removablefs_parse_id(val, &id);
 		if (err)
 			return err;
 		uid = make_kuid(ns, id);
@@ -109,7 +109,7 @@ static int ownfs_parse_opt(struct ownfs_mount_opts *o, const char *key,
 	if (!strcmp(key, "gid") || !strcmp(key, "diskgid")) {
 		kgid_t gid;
 
-		err = ownfs_parse_id(val, &id);
+		err = removablefs_parse_id(val, &id);
 		if (err)
 			return err;
 		gid = make_kgid(ns, id);
@@ -125,7 +125,7 @@ static int ownfs_parse_opt(struct ownfs_mount_opts *o, const char *key,
 		return 0;
 	}
 	if (!strcmp(key, "lower")) {
-		if (!val || !*val || strlen(val) >= OWNFS_TYPE_LEN)
+		if (!val || !*val || strlen(val) >= REMOVABLEFS_TYPE_LEN)
 			return -EINVAL;
 		kfree(o->lower_type);
 		o->lower_type = kstrdup(val, GFP_KERNEL);
@@ -135,12 +135,12 @@ static int ownfs_parse_opt(struct ownfs_mount_opts *o, const char *key,
 		o->quiet = true;
 		return 0;
 	}
-	return ownfs_append_lower(o, key, val);
+	return removablefs_append_lower(o, key, val);
 }
 
 #ifndef HAVE_FS_CONTEXT
 /* Parse a legacy comma-separated option string. */
-static int ownfs_parse_string(struct ownfs_mount_opts *o, char *data)
+static int removablefs_parse_string(struct removablefs_mount_opts *o, char *data)
 {
 	char *p;
 	int err;
@@ -153,9 +153,9 @@ static int ownfs_parse_string(struct ownfs_mount_opts *o, char *data)
 		val = strchr(p, '=');
 		if (val)
 			*val++ = '\0';
-		err = ownfs_parse_opt(o, p, val);
+		err = removablefs_parse_opt(o, p, val);
 		if (err) {
-			pr_err("ownfs: bad mount option '%s'\n", p);
+			pr_err("removablefs: bad mount option '%s'\n", p);
 			return err;
 		}
 	}
@@ -164,26 +164,26 @@ static int ownfs_parse_string(struct ownfs_mount_opts *o, char *data)
 #endif
 
 /* put_filesystem() is not exported; it is just this. */
-static void ownfs_put_filesystem(struct file_system_type *fstype)
+static void removablefs_put_filesystem(struct file_system_type *fstype)
 {
 	module_put(fstype->owner);
 }
 
-static struct vfsmount *ownfs_mount_lower_type(const char *type, int flags,
-					       struct ownfs_mount_opts *o)
+static struct vfsmount *removablefs_mount_lower_type(const char *type, int flags,
+						     struct removablefs_mount_opts *o)
 {
 	struct file_system_type *fstype;
 	struct vfsmount *mnt;
 	char *data;
 
-	if (!strcmp(type, OWNFS_NAME))
+	if (!strcmp(type, REMOVABLEFS_NAME))
 		return ERR_PTR(-EINVAL);
 	fstype = get_fs_type(type);
 	if (!fstype)
 		return ERR_PTR(-ENODEV);
 	if (!(fstype->fs_flags & FS_REQUIRES_DEV)) {
 		/* Only block-device filesystems make sense underneath. */
-		ownfs_put_filesystem(fstype);
+		removablefs_put_filesystem(fstype);
 		return ERR_PTR(-EINVAL);
 	}
 	/*
@@ -193,32 +193,32 @@ static struct vfsmount *ownfs_mount_lower_type(const char *type, int flags,
 	 */
 	data = o->lower_data ? kstrdup(o->lower_data, GFP_KERNEL) : NULL;
 	if (o->lower_data && !data) {
-		ownfs_put_filesystem(fstype);
+		removablefs_put_filesystem(fstype);
 		return ERR_PTR(-ENOMEM);
 	}
 	mnt = vfs_kern_mount(fstype, flags, o->source, data);
 	kfree(data);
-	ownfs_put_filesystem(fstype);
+	removablefs_put_filesystem(fstype);
 	return mnt;
 }
 
-static struct vfsmount *ownfs_mount_lower(struct ownfs_mount_opts *o,
-					  int flags, char *type_out,
-					  size_t type_len)
+static struct vfsmount *removablefs_mount_lower(struct removablefs_mount_opts *o,
+						int flags, char *type_out,
+						size_t type_len)
 {
 	struct vfsmount *mnt = ERR_PTR(-EINVAL);
 	int i;
 
 	if (o->lower_type) {
-		mnt = ownfs_mount_lower_type(o->lower_type, flags, o);
+		mnt = removablefs_mount_lower_type(o->lower_type, flags, o);
 		if (!IS_ERR(mnt))
 			strscpy(type_out, o->lower_type, type_len);
 		return mnt;
 	}
-	for (i = 0; ownfs_probe_types[i]; i++) {
-		mnt = ownfs_mount_lower_type(ownfs_probe_types[i], flags, o);
+	for (i = 0; removablefs_probe_types[i]; i++) {
+		mnt = removablefs_mount_lower_type(removablefs_probe_types[i], flags, o);
 		if (!IS_ERR(mnt)) {
-			strscpy(type_out, ownfs_probe_types[i], type_len);
+			strscpy(type_out, removablefs_probe_types[i], type_len);
 			return mnt;
 		}
 		/* Lack of memory or a busy device won't improve on retry. */
@@ -229,7 +229,7 @@ static struct vfsmount *ownfs_mount_lower(struct ownfs_mount_opts *o,
 }
 
 /* The dev_t of the block device at @path, if it is one; else unchanged. */
-static void ownfs_source_dev(const char *path, dev_t *dev)
+static void removablefs_source_dev(const char *path, dev_t *dev)
 {
 #if defined(HAVE_LOOKUP_BDEV_DEV)
 	dev_t d;
@@ -248,14 +248,14 @@ static void ownfs_source_dev(const char *path, dev_t *dev)
 
 /*
  * The credentials every lower operation runs with: the mounter's (udisksd,
- * normally), with fsuid/fsgid set to the drive's owner so new files are
+								   * normally), with fsuid/fsgid set to the drive's owner so new files are
  * stored as that owner, no supplementary groups, and only the capabilities
  * needed to bypass the lower fs's own DAC checks.  Permission was already
- * checked at the ownfs layer.  Deliberately absent: CAP_SYS_RESOURCE (no
+ * checked at the removablefs layer.  Deliberately absent: CAP_SYS_RESOURCE (no
  * dipping into reserved blocks), CAP_SYS_ADMIN (no trusted.* xattrs),
  * CAP_FSETID and CAP_CHOWN.
  */
-static const struct cred *ownfs_make_cred(kuid_t uid, kgid_t gid)
+static const struct cred *removablefs_make_cred(kuid_t uid, kgid_t gid)
 {
 	struct group_info *groups;
 	struct cred *cred;
@@ -282,10 +282,10 @@ static const struct cred *ownfs_make_cred(kuid_t uid, kgid_t gid)
 	return cred;
 }
 
-static int ownfs_fill_super(struct super_block *sb,
-			    struct ownfs_mount_opts *o, int silent)
+static int removablefs_fill_super(struct super_block *sb,
+				  struct removablefs_mount_opts *o, int silent)
 {
-	struct ownfs_sb_info *sbi;
+	struct removablefs_sb_info *sbi;
 	struct super_block *lower_sb;
 	struct dentry *lower_root;
 	struct inode *root;
@@ -293,7 +293,7 @@ static int ownfs_fill_super(struct super_block *sb,
 
 	if (!o->source || !*o->source) {
 		if (!silent)
-			pr_err("ownfs: no block device given\n");
+			pr_err("removablefs: no block device given\n");
 		return -EINVAL;
 	}
 
@@ -302,14 +302,14 @@ static int ownfs_fill_super(struct super_block *sb,
 		return -ENOMEM;
 	sb->s_fs_info = sbi;
 
-	sbi->lower_mnt = ownfs_mount_lower(o, sb->s_flags & SB_RDONLY,
-					   sbi->lower_type,
-					   sizeof(sbi->lower_type));
+	sbi->lower_mnt = removablefs_mount_lower(o, sb->s_flags & SB_RDONLY,
+						 sbi->lower_type,
+						 sizeof(sbi->lower_type));
 	if (IS_ERR(sbi->lower_mnt)) {
 		err = PTR_ERR(sbi->lower_mnt);
 		sbi->lower_mnt = NULL;
 		if (!silent)
-			pr_err("ownfs: cannot mount %s: %d\n", o->source, err);
+			pr_err("removablefs: cannot mount %s: %d\n", o->source, err);
 		return err;
 	}
 	lower_sb = sbi->lower_mnt->mnt_sb;
@@ -317,7 +317,7 @@ static int ownfs_fill_super(struct super_block *sb,
 
 	err = -EINVAL;
 	if (lower_sb->s_stack_depth >= FILESYSTEM_MAX_STACK_DEPTH) {
-		pr_err("ownfs: maximum fs stacking depth exceeded\n");
+		pr_err("removablefs: maximum fs stacking depth exceeded\n");
 		return err;
 	}
 
@@ -333,14 +333,14 @@ static int ownfs_fill_super(struct super_block *sb,
 	}
 
 	err = -ENOMEM;
-	sbi->cred = ownfs_make_cred(sbi->disk_uid, sbi->disk_gid);
+	sbi->cred = removablefs_make_cred(sbi->disk_uid, sbi->disk_gid);
 	if (!sbi->cred)
 		return err;
 
-	sb->s_magic = OWNFS_MAGIC;
-	sb->s_op = &ownfs_sops;
-	sb->s_xattr = ownfs_xattr_handlers;
-	ownfs_set_default_d_op(sb, &ownfs_dops);
+	sb->s_magic = REMOVABLEFS_MAGIC;
+	sb->s_op = &removablefs_sops;
+	sb->s_xattr = removablefs_xattr_handlers;
+	removablefs_set_default_d_op(sb, &removablefs_dops);
 	sb->s_stack_depth = lower_sb->s_stack_depth + 1;
 	sb->s_maxbytes = lower_sb->s_maxbytes;
 	sb->s_blocksize = lower_sb->s_blocksize;
@@ -368,9 +368,9 @@ static int ownfs_fill_super(struct super_block *sb,
 	sbi->anon_dev = sb->s_dev;
 	sb->s_dev = lower_sb->s_dev;
 	if (MAJOR(sb->s_dev) == 0)
-		ownfs_source_dev(o->source, &sb->s_dev);
+		removablefs_source_dev(o->source, &sb->s_dev);
 
-	root = ownfs_iget(sb, d_inode(lower_root));
+	root = removablefs_iget(sb, d_inode(lower_root));
 	if (IS_ERR(root))
 		return PTR_ERR(root);
 	sb->s_root = d_make_root(root);
@@ -380,9 +380,9 @@ static int ownfs_fill_super(struct super_block *sb,
 	return 0;
 }
 
-static void ownfs_kill_sb(struct super_block *sb)
+static void removablefs_kill_sb(struct super_block *sb)
 {
-	struct ownfs_sb_info *sbi = OWNFS_SB(sb);
+	struct removablefs_sb_info *sbi = REMOVABLEFS_SB(sb);
 
 	if (sbi && sbi->anon_dev)
 		sb->s_dev = sbi->anon_dev;
@@ -398,14 +398,14 @@ static void ownfs_kill_sb(struct super_block *sb)
 	}
 }
 
-static struct inode *ownfs_alloc_inode(struct super_block *sb)
+static struct inode *removablefs_alloc_inode(struct super_block *sb)
 {
-	struct ownfs_inode_info *oi;
+	struct removablefs_inode_info *oi;
 
 #ifdef HAVE_ALLOC_INODE_SB
-	oi = alloc_inode_sb(sb, ownfs_inode_cachep, GFP_KERNEL);
+	oi = alloc_inode_sb(sb, removablefs_inode_cachep, GFP_KERNEL);
 #else
-	oi = kmem_cache_alloc(ownfs_inode_cachep, GFP_KERNEL);
+	oi = kmem_cache_alloc(removablefs_inode_cachep, GFP_KERNEL);
 #endif
 	if (!oi)
 		return NULL;
@@ -413,55 +413,55 @@ static struct inode *ownfs_alloc_inode(struct super_block *sb)
 	return &oi->vfs_inode;
 }
 
-static void ownfs_evict_inode(struct inode *inode)
+static void removablefs_evict_inode(struct inode *inode)
 {
-	struct inode *lower = ownfs_lower_inode(inode);
+	struct inode *lower = removablefs_lower_inode(inode);
 
 	truncate_inode_pages_final(&inode->i_data);
 	clear_inode(inode);
-	OWNFS_I(inode)->lower = NULL;
+	REMOVABLEFS_I(inode)->lower = NULL;
 	iput(lower);
 }
 
 #ifdef HAVE_FREE_INODE
-static void ownfs_free_inode(struct inode *inode)
+static void removablefs_free_inode(struct inode *inode)
 {
-	kmem_cache_free(ownfs_inode_cachep, OWNFS_I(inode));
+	kmem_cache_free(removablefs_inode_cachep, REMOVABLEFS_I(inode));
 }
 #else
-static void ownfs_i_callback(struct rcu_head *head)
+static void removablefs_i_callback(struct rcu_head *head)
 {
 	struct inode *inode = container_of(head, struct inode, i_rcu);
 
-	kmem_cache_free(ownfs_inode_cachep, OWNFS_I(inode));
+	kmem_cache_free(removablefs_inode_cachep, REMOVABLEFS_I(inode));
 }
 
-static void ownfs_destroy_inode(struct inode *inode)
+static void removablefs_destroy_inode(struct inode *inode)
 {
-	call_rcu(&inode->i_rcu, ownfs_i_callback);
+	call_rcu(&inode->i_rcu, removablefs_i_callback);
 }
 #endif
 
-static int ownfs_statfs(struct dentry *dentry, struct kstatfs *buf)
+static int removablefs_statfs(struct dentry *dentry, struct kstatfs *buf)
 {
 	struct path lower_path = {
-		.mnt	= ownfs_lower_mnt(dentry->d_sb),
-		.dentry	= ownfs_lower(dentry),
+		.mnt	= removablefs_lower_mnt(dentry->d_sb),
+		.dentry	= removablefs_lower(dentry),
 	};
 	const struct cred *old;
 	int err;
 
-	old = ownfs_override_creds(dentry->d_sb);
+	old = removablefs_override_creds(dentry->d_sb);
 	err = vfs_statfs(&lower_path, buf);
-	ownfs_revert_creds(old);
+	removablefs_revert_creds(old);
 	if (!err)
-		buf->f_type = OWNFS_MAGIC;
+		buf->f_type = REMOVABLEFS_MAGIC;
 	return err;
 }
 
-static int ownfs_sync_fs(struct super_block *sb, int wait)
+static int removablefs_sync_fs(struct super_block *sb, int wait)
 {
-	struct super_block *lower_sb = ownfs_lower_mnt(sb)->mnt_sb;
+	struct super_block *lower_sb = removablefs_lower_mnt(sb)->mnt_sb;
 	int err;
 
 	if (!wait || sb_rdonly(lower_sb))
@@ -472,9 +472,9 @@ static int ownfs_sync_fs(struct super_block *sb, int wait)
 	return err;
 }
 
-static int ownfs_show_options(struct seq_file *m, struct dentry *root)
+static int removablefs_show_options(struct seq_file *m, struct dentry *root)
 {
-	struct ownfs_sb_info *sbi = OWNFS_SB(root->d_sb);
+	struct removablefs_sb_info *sbi = REMOVABLEFS_SB(root->d_sb);
 
 	seq_printf(m, ",uid=%u", from_kuid_munged(&init_user_ns, sbi->uid));
 	seq_printf(m, ",gid=%u", from_kgid_munged(&init_user_ns, sbi->gid));
@@ -493,9 +493,9 @@ static int ownfs_show_options(struct seq_file *m, struct dentry *root)
 }
 
 /* Going read-write is only possible if the lower fs already is. */
-static int ownfs_check_remount(struct super_block *sb, unsigned int sb_flags)
+static int removablefs_check_remount(struct super_block *sb, unsigned int sb_flags)
 {
-	struct super_block *lower_sb = ownfs_lower_mnt(sb)->mnt_sb;
+	struct super_block *lower_sb = removablefs_lower_mnt(sb)->mnt_sb;
 
 	if (!(sb_flags & SB_RDONLY) && sb_rdonly(lower_sb))
 		return -EROFS;
@@ -503,38 +503,38 @@ static int ownfs_check_remount(struct super_block *sb, unsigned int sb_flags)
 }
 
 #ifndef HAVE_FS_CONTEXT
-static int ownfs_remount_fs(struct super_block *sb, int *flags, char *data)
+static int removablefs_remount_fs(struct super_block *sb, int *flags, char *data)
 {
 	sync_filesystem(sb);
-	return ownfs_check_remount(sb, *flags);
+	return removablefs_check_remount(sb, *flags);
 }
 #endif
 
-static const struct super_operations ownfs_sops = {
-	.alloc_inode	= ownfs_alloc_inode,
+static const struct super_operations removablefs_sops = {
+	.alloc_inode	= removablefs_alloc_inode,
 #ifdef HAVE_FREE_INODE
-	.free_inode	= ownfs_free_inode,
+	.free_inode	= removablefs_free_inode,
 #else
-	.destroy_inode	= ownfs_destroy_inode,
+	.destroy_inode	= removablefs_destroy_inode,
 #endif
-	.evict_inode	= ownfs_evict_inode,
+	.evict_inode	= removablefs_evict_inode,
 #ifdef HAVE_INODE_JUST_DROP
 	.drop_inode	= inode_just_drop,
 #else
 	.drop_inode	= generic_delete_inode,
 #endif
-	.statfs		= ownfs_statfs,
-	.sync_fs	= ownfs_sync_fs,
-	.show_options	= ownfs_show_options,
+	.statfs		= removablefs_statfs,
+	.sync_fs	= removablefs_sync_fs,
+	.show_options	= removablefs_show_options,
 #ifndef HAVE_FS_CONTEXT
-	.remount_fs	= ownfs_remount_fs,
+	.remount_fs	= removablefs_remount_fs,
 #endif
 };
 
 #ifdef HAVE_FS_CONTEXT
-static int ownfs_parse_param(struct fs_context *fc, struct fs_parameter *param)
+static int removablefs_parse_param(struct fs_context *fc, struct fs_parameter *param)
 {
-	struct ownfs_mount_opts *o = fc->fs_private;
+	struct removablefs_mount_opts *o = fc->fs_private;
 	const char *val = NULL;
 	int err;
 
@@ -549,76 +549,76 @@ static int ownfs_parse_param(struct fs_context *fc, struct fs_parameter *param)
 		val = param->string;
 		break;
 	default:
-		return invalf(fc, "ownfs: %s: unsupported value type",
+		return invalf(fc, "removablefs: %s: unsupported value type",
 			      param->key);
 	}
-	err = ownfs_parse_opt(o, param->key, val);
+	err = removablefs_parse_opt(o, param->key, val);
 	if (err)
-		return invalf(fc, "ownfs: bad mount option '%s'", param->key);
+		return invalf(fc, "removablefs: bad mount option '%s'", param->key);
 	return 0;
 }
 
-static int ownfs_fill_super_fc(struct super_block *sb, struct fs_context *fc)
+static int removablefs_fill_super_fc(struct super_block *sb, struct fs_context *fc)
 {
-	struct ownfs_mount_opts *o = fc->fs_private;
+	struct removablefs_mount_opts *o = fc->fs_private;
 
 	kfree(o->source);
 	o->source = kstrdup(fc->source, GFP_KERNEL);
 	if (fc->source && !o->source)
 		return -ENOMEM;
-	return ownfs_fill_super(sb, o, fc->sb_flags & SB_SILENT);
+	return removablefs_fill_super(sb, o, fc->sb_flags & SB_SILENT);
 }
 
-static int ownfs_get_tree(struct fs_context *fc)
+static int removablefs_get_tree(struct fs_context *fc)
 {
-	return get_tree_nodev(fc, ownfs_fill_super_fc);
+	return get_tree_nodev(fc, removablefs_fill_super_fc);
 }
 
-static int ownfs_reconfigure(struct fs_context *fc)
+static int removablefs_reconfigure(struct fs_context *fc)
 {
 	sync_filesystem(fc->root->d_sb);
-	return ownfs_check_remount(fc->root->d_sb, fc->sb_flags);
+	return removablefs_check_remount(fc->root->d_sb, fc->sb_flags);
 }
 
-static void ownfs_free_fc(struct fs_context *fc)
+static void removablefs_free_fc(struct fs_context *fc)
 {
-	struct ownfs_mount_opts *o = fc->fs_private;
+	struct removablefs_mount_opts *o = fc->fs_private;
 
 	if (o) {
-		ownfs_free_opts(o);
+		removablefs_free_opts(o);
 		kfree(o);
 	}
 }
 
-static const struct fs_context_operations ownfs_context_ops = {
-	.parse_param	= ownfs_parse_param,
-	.get_tree	= ownfs_get_tree,
-	.reconfigure	= ownfs_reconfigure,
-	.free		= ownfs_free_fc,
+static const struct fs_context_operations removablefs_context_ops = {
+	.parse_param	= removablefs_parse_param,
+	.get_tree	= removablefs_get_tree,
+	.reconfigure	= removablefs_reconfigure,
+	.free		= removablefs_free_fc,
 };
 
-static int ownfs_init_fs_context(struct fs_context *fc)
+static int removablefs_init_fs_context(struct fs_context *fc)
 {
-	struct ownfs_mount_opts *o;
+	struct removablefs_mount_opts *o;
 
 	o = kzalloc(sizeof(*o), GFP_KERNEL);
 	if (!o)
 		return -ENOMEM;
 	fc->fs_private = o;
-	fc->ops = &ownfs_context_ops;
+	fc->ops = &removablefs_context_ops;
 	return 0;
 }
 #else /* !HAVE_FS_CONTEXT */
-static int ownfs_fill_super_legacy(struct super_block *sb, void *data,
-				   int silent)
+static int removablefs_fill_super_legacy(struct super_block *sb, void *data,
+					 int silent)
 {
-	return ownfs_fill_super(sb, data, silent);
+	return removablefs_fill_super(sb, data, silent);
 }
 
-static struct dentry *ownfs_mount(struct file_system_type *fs_type, int flags,
-				  const char *dev_name, void *data)
+static struct dentry *removablefs_mount(struct file_system_type *fs_type, int flags,
+					const char *dev_name, void *data)
 {
-	struct ownfs_mount_opts o = {};
+	struct removablefs_mount_opts o = {};
 	struct dentry *root;
 	int err;
 
@@ -629,79 +629,79 @@ static struct dentry *ownfs_mount(struct file_system_type *fs_type, int flags,
 		char *copy = kstrdup(data, GFP_KERNEL);
 
 		if (!copy) {
-			ownfs_free_opts(&o);
+			removablefs_free_opts(&o);
 			return ERR_PTR(-ENOMEM);
 		}
-		err = ownfs_parse_string(&o, copy);
+		err = removablefs_parse_string(&o, copy);
 		kfree(copy);
 		if (err) {
-			ownfs_free_opts(&o);
+			removablefs_free_opts(&o);
 			return ERR_PTR(err);
 		}
 	}
-	root = mount_nodev(fs_type, flags, &o, ownfs_fill_super_legacy);
-	ownfs_free_opts(&o);
+	root = mount_nodev(fs_type, flags, &o, removablefs_fill_super_legacy);
+	removablefs_free_opts(&o);
 	return root;
 }
 #endif /* HAVE_FS_CONTEXT */
 
-static struct file_system_type ownfs_fs_type = {
+static struct file_system_type removablefs_fs_type = {
 	.owner			= THIS_MODULE,
-	.name			= OWNFS_NAME,
+	.name			= REMOVABLEFS_NAME,
 #ifdef HAVE_FS_CONTEXT
-	.init_fs_context	= ownfs_init_fs_context,
+	.init_fs_context	= removablefs_init_fs_context,
 #else
-	.mount			= ownfs_mount,
+	.mount			= removablefs_mount,
 #endif
-	.kill_sb		= ownfs_kill_sb,
+	.kill_sb		= removablefs_kill_sb,
 	/*
-	 * No FS_REQUIRES_DEV: ownfs has no block device of its own, and
+	 * No FS_REQUIRES_DEV: removablefs has no block device of its own, and
 	 * libmount/udisks only need the source string.  No FS_USERNS_MOUNT:
 	 * only the initial namespace's root (udisksd) may mount it.
 	 */
 };
-MODULE_ALIAS_FS(OWNFS_NAME);
+MODULE_ALIAS_FS(REMOVABLEFS_NAME);
 
-static void ownfs_inode_init_once(void *p)
+static void removablefs_inode_init_once(void *p)
 {
-	struct ownfs_inode_info *oi = p;
+	struct removablefs_inode_info *oi = p;
 
 	inode_init_once(&oi->vfs_inode);
 }
 
-static int __init ownfs_init(void)
+static int __init removablefs_init(void)
 {
 	int err;
 
-	ownfs_inode_cachep = kmem_cache_create("ownfs_inode",
-					       sizeof(struct ownfs_inode_info),
-					       0, SLAB_RECLAIM_ACCOUNT |
-					       SLAB_ACCOUNT,
-					       ownfs_inode_init_once);
-	if (!ownfs_inode_cachep)
+	removablefs_inode_cachep = kmem_cache_create("removablefs_inode",
+						     sizeof(struct removablefs_inode_info),
+						     0, SLAB_RECLAIM_ACCOUNT |
+						     SLAB_ACCOUNT,
+						     removablefs_inode_init_once);
+	if (!removablefs_inode_cachep)
 		return -ENOMEM;
 
-	err = register_filesystem(&ownfs_fs_type);
+	err = register_filesystem(&removablefs_fs_type);
 	if (err) {
-		kmem_cache_destroy(ownfs_inode_cachep);
+		kmem_cache_destroy(removablefs_inode_cachep);
 		return err;
 	}
-	pr_info("ownfs " OWNFS_VERSION " loaded\n");
+	pr_info("removablefs " REMOVABLEFS_VERSION " loaded\n");
 	return 0;
 }
 
-static void __exit ownfs_exit(void)
+static void __exit removablefs_exit(void)
 {
-	unregister_filesystem(&ownfs_fs_type);
+	unregister_filesystem(&removablefs_fs_type);
 	/* Make sure RCU-freed inodes are gone before the cache goes. */
 	rcu_barrier();
-	kmem_cache_destroy(ownfs_inode_cachep);
+	kmem_cache_destroy(removablefs_inode_cachep);
 }
 
-module_init(ownfs_init);
-module_exit(ownfs_exit);
+module_init(removablefs_init);
+module_exit(removablefs_exit);
 
 MODULE_DESCRIPTION("Present a POSIX filesystem as owned by the mounting user");
 MODULE_AUTHOR("Will Rouesnel <wrouesnel@wrouesnel.com>");
 MODULE_LICENSE("GPL");
-MODULE_VERSION(OWNFS_VERSION);
+MODULE_VERSION(REMOVABLEFS_VERSION);

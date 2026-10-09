@@ -1,6 +1,6 @@
 # Packaging helpers.  The kernel module itself lives in module/ (see its
 # Makefile); this file builds release tarballs and packages from the tree.
-VERSION := $(shell sed -n 's/^Version: *//p' rpm/ownfs.spec)
+VERSION := $(shell sed -n 's/^Version: *//p' rpm/removablefs.spec)
 DIST    ?= dist
 ABSDIST := $(abspath $(DIST))
 
@@ -12,25 +12,25 @@ tarball:
 	mkdir -p $(DIST)
 	if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then \
 		git ls-files -z --cached --others --exclude-standard | tar --null -T - \
-			--transform 's,^,ownfs-$(VERSION)/,' --owner=0 --group=0 \
-			-czf $(DIST)/ownfs-$(VERSION).tar.gz; \
+			--transform 's,^,removablefs-$(VERSION)/,' --owner=0 --group=0 \
+			-czf $(DIST)/removablefs-$(VERSION).tar.gz; \
 	else \
-		tar --exclude='./$(DIST)' --transform 's,^\.,ownfs-$(VERSION),' \
-			--owner=0 --group=0 -czf $(DIST)/ownfs-$(VERSION).tar.gz .; \
+		tar --exclude='./$(DIST)' --transform 's,^\.,removablefs-$(VERSION),' \
+			--owner=0 --group=0 -czf $(DIST)/removablefs-$(VERSION).tar.gz .; \
 	fi
 
 srpm: tarball
-	rpmbuild -bs --define "_sourcedir $(ABSDIST)" --define "_srcrpmdir $(ABSDIST)" rpm/ownfs.spec
+	rpmbuild -bs --define "_sourcedir $(ABSDIST)" --define "_srcrpmdir $(ABSDIST)" rpm/removablefs.spec
 
 rpm: tarball
 	rpmbuild -ba --define "_topdir $(ABSDIST)/rpmbuild" --define "_sourcedir $(ABSDIST)" \
-		--define "_rpmdir $(ABSDIST)" --define "_srcrpmdir $(ABSDIST)" rpm/ownfs.spec
+		--define "_rpmdir $(ABSDIST)" --define "_srcrpmdir $(ABSDIST)" rpm/removablefs.spec
 
 # Binary .debs land in $(DIST).
 deb:
 	mkdir -p $(DIST)
 	dpkg-buildpackage -us -uc -b
-	mv ../ownfs_$(VERSION)*.deb ../ownfs-dkms_$(VERSION)*.deb ../ownfs_$(VERSION)*.buildinfo ../ownfs_$(VERSION)*.changes $(DIST)/
+	mv ../removablefs_$(VERSION)*.deb ../removablefs-dkms_$(VERSION)*.deb ../removablefs_$(VERSION)*.buildinfo ../removablefs_$(VERSION)*.changes $(DIST)/
 
 check-version:
 	scripts/check-version.sh

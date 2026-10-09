@@ -1,17 +1,20 @@
-Source: ownfs
+Source: removablefs
 Section: kernel
 Priority: optional
 Maintainer: Will Rouesnel <wrouesnel@wrouesnel.com>
 Build-Depends: debhelper-compat (= 13), dh-sequence-dkms
 Standards-Version: 4.6.2
 Rules-Requires-Root: no
+Homepage: https://github.com/wrouesnel/removablefs
+Vcs-Browser: https://github.com/wrouesnel/removablefs
+Vcs-Git: https://github.com/wrouesnel/removablefs.git
 
-Package: ownfs-dkms
+Package: removablefs-dkms
 Architecture: all
 Depends: ${misc:Depends}
-Recommends: ownfs
+Recommends: removablefs
 Description: ownership-squashing stacked filesystem (DKMS module source)
- ownfs mounts a Linux filesystem such as ext4, XFS, btrfs or f2fs so that
+ removablefs mounts a Linux filesystem such as ext4, XFS, btrfs or f2fs so that
  every file appears to belong to the user who mounted it, the way FAT, exFAT
  and NTFS drives behave. New files are stored on disk as the owner of the
  drive's top-level directory.
@@ -19,12 +22,12 @@ Description: ownership-squashing stacked filesystem (DKMS module source)
  This package provides the kernel module source, built for each installed
  kernel by DKMS.
 
-Package: ownfs
+Package: removablefs
 Architecture: all
-Depends: ${misc:Depends}, ownfs-dkms (= ${binary:Version}), udisks2 (>= 2.9)
+Depends: ${misc:Depends}, removablefs-dkms (= ${binary:Version}), udisks2 (>= 2.9)
 Description: removable Linux filesystems owned by the desktop user
  Makes udisks2 mount removable drives (USB, SD cards and FireWire) that carry
- ext2/3/4, XFS, btrfs or f2fs through ownfs, so the desktop user can read and
+ ext2/3/4, XFS, btrfs or f2fs through removablefs, so the desktop user can read and
  write everything on them regardless of the user and group IDs stored on
  disk, just as with FAT, exFAT and NTFS drives. Internal disks are not
  affected.

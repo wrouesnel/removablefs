@@ -39,7 +39,7 @@ if "$V" ssh 'loginctl list-sessions --no-legend | grep -q alice'; then
 else
     bad "alice never logged in"; exit 1
 fi
-if "$V" ssh 'ls /etc/polkit-1/rules.d/10-ownfs-test.rules /etc/polkit-1/localauthority/50-local.d/10-ownfs-test.pkla 2>/dev/null | grep -q .'; then
+if "$V" ssh 'ls /etc/polkit-1/rules.d/10-removablefs-test.rules /etc/polkit-1/localauthority/50-local.d/10-removablefs-test.pkla 2>/dev/null | grep -q .'; then
     bad "test polkit rules present; this would not test real authorisation"
 fi
 
@@ -60,16 +60,16 @@ log "plugging in the drive"
 
 mp=""
 for _ in $(seq 1 30); do
-    mp="$("$V" ssh "findmnt -rno TARGET,FSTYPE | awk '\$2 == \"ownfs\" && \$1 ~ /${LABEL}\$/ {print \$1}'" || true)"
+    mp="$("$V" ssh "findmnt -rno TARGET,FSTYPE | awk '\$2 == \"removablefs\" && \$1 ~ /${LABEL}\$/ {print \$1}'" || true)"
     [[ -n "$mp" ]] && break
     sleep 1
 done
 sleep 3
 shot plugged-in
 if [[ -n "$mp" ]]; then
-    ok "GNOME automounted the drive through ownfs at $mp"
+    ok "GNOME automounted the drive through removablefs at $mp"
 else
-    bad "drive was not automounted with ownfs"
+    bad "drive was not automounted with removablefs"
     "$V" ssh 'findmnt -rno TARGET,SOURCE,FSTYPE | grep -E "media|sd"; sudo journalctl -b --no-pager -u udisks2 | tail -5'
     exit 1
 fi
@@ -104,7 +104,7 @@ else
     bad "eject failed"
 fi
 sleep 3
-"$V" ssh "! findmnt -rno FSTYPE | grep -qx ownfs" && ok "drive unmounted" || bad "still mounted"
+"$V" ssh "! findmnt -rno FSTYPE | grep -qx removablefs" && ok "drive unmounted" || bad "still mounted"
 shot ejected
 
 # Plug it in again and check what landed on disk, natively.

@@ -1,7 +1,7 @@
-; SELinux labelling for ownfs mounts.
+; SELinux labelling for removablefs mounts.
 ;
-; ownfs ignores the drive's stored ownership, and its labels describe the
+; removablefs ignores the drive's stored ownership, and its labels describe the
 ; policy of whatever machine wrote them, so it is labelled like other
 ; removable media without usable labels (vfat, exfat, ntfs3): every file is
 ; dosfs_t, which desktop applications may read and write.
-(genfscon ownfs "/" (system_u object_r dosfs_t ((s0) (s0))))
+(genfscon removablefs "/" (system_u object_r dosfs_t ((s0) (s0))))

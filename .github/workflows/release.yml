@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes --title "ownfs ${GITHUB_REF_NAME#v}"
+      - run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes --title "removablefs ${GITHUB_REF_NAME#v}"
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -58,7 +58,7 @@ jobs:
             --sign-key="${{ vars.PACKAGE_SIGNING_KEY_FINGERPRINT }}" \
             --sign-command="gpg --batch --pinentry-mode loopback --passphrase-file $RUNNER_TEMP/pass"
           rm -f "$RUNNER_TEMP/pass"
-          dput ppa:w-rouesnel/ownfs ../ownfs_${version}_source.changes
+          dput ppa:w-rouesnel/removablefs ../removablefs_${version}_source.changes
         env:
           PACKAGE_SIGNING_KEY_PASSPHRASE: ${{ secrets.PACKAGE_SIGNING_KEY_PASSPHRASE }}
 
@@ -72,6 +72,6 @@ jobs:
           mkdir -p ~/.config
           printf '%s\n' "$COPR_CONFIG" > ~/.config/copr
           copr-cli buildscm --clone-url "https://github.com/${GITHUB_REPOSITORY}" \
-            --commit "$GITHUB_REF_NAME" --method make_srpm wrouesnel/ownfs
+            --commit "$GITHUB_REF_NAME" --method make_srpm wrouesnel/removablefs
         env:
           COPR_CONFIG: ${{ secrets.COPR_CONFIG }}

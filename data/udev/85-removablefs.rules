@@ -1,0 +1,41 @@
+# removablefs: have udisks2 mount removable Linux filesystems through removablefs, so the
+# desktop user owns everything on the drive, as with FAT, exFAT and NTFS.
+#
+# udisks2 takes a device's filesystem type from ID_FS_TYPE and its mount
+# options from UDISKS_MOUNT_OPTIONS_<TYPE>_* properties, so this rule
+# reports removable ext2/3/4, XFS, btrfs and f2fs devices as type "removablefs"
+# and keeps the real type in REMOVABLEFS_LOWER_TYPE, which removablefs gets as lower=.
+# (udisks2 2.10's per-driver options can't be used: they need property names
+# with ':', which systemd 259 and later reject.)
+#
+# The module is loaded first, and only if that works is the device claimed;
+# otherwise it keeps its real type and udisks2 mounts it natively.
+#
+# To opt a device out, set ENV{REMOVABLEFS_IGNORE}="1" in an earlier rule.
+
+ACTION=="remove", GOTO="removablefs_end"
+SUBSYSTEM!="block", GOTO="removablefs_end"
+ENV{ID_FS_USAGE}!="filesystem", GOTO="removablefs_end"
+ENV{REMOVABLEFS_IGNORE}=="1", GOTO="removablefs_end"
+ENV{ID_FS_TYPE}!="ext2|ext3|ext4|xfs|btrfs|f2fs", GOTO="removablefs_end"
+
+# Removable media only: USB, SD/MMC, FireWire, or a removable-flagged disk.
+# Internal disks keep normal POSIX ownership.
+ENV{ID_BUS}=="usb", GOTO="removablefs_removable"
+ENV{ID_BUS}=="ieee1394", GOTO="removablefs_removable"
+ENV{ID_DRIVE_FLASH_SD}=="1", GOTO="removablefs_removable"
+ENV{ID_DRIVE_MEDIA_FLASH_SD}=="1", GOTO="removablefs_removable"
+KERNEL=="mmcblk*", GOTO="removablefs_removable"
+ATTRS{removable}=="1", GOTO="removablefs_removable"
+GOTO="removablefs_end"
+
+LABEL="removablefs_removable"
+PROGRAM!="/sbin/modprobe -q removablefs", GOTO="removablefs_end"
+ENV{REMOVABLEFS_LOWER_TYPE}="$env{ID_FS_TYPE}"
+ENV{ID_FS_TYPE}="removablefs"
+ENV{UDISKS_MOUNT_OPTIONS_REMOVABLEFS_DEFAULTS}="uid=$$UID,gid=$$GID,lower=$env{REMOVABLEFS_LOWER_TYPE}"
+ENV{UDISKS_MOUNT_OPTIONS_REMOVABLEFS_ALLOW}="uid=$$UID,gid=$$GID,lower=$env{REMOVABLEFS_LOWER_TYPE}"
+# udisks2 mounts ext2/3/4 with errors=remount-ro; removablefs passes it through.
+ENV{REMOVABLEFS_LOWER_TYPE}=="ext2|ext3|ext4", ENV{UDISKS_MOUNT_OPTIONS_REMOVABLEFS_DEFAULTS}="$env{UDISKS_MOUNT_OPTIONS_REMOVABLEFS_DEFAULTS},errors=remount-ro", ENV{UDISKS_MOUNT_OPTIONS_REMOVABLEFS_ALLOW}="$env{UDISKS_MOUNT_OPTIONS_REMOVABLEFS_ALLOW},errors=remount-ro"
+
+LABEL="removablefs_end"

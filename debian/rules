@@ -2,7 +2,7 @@
 
 # The DKMS module version is the upstream part of the package version.
 VERSION := $(shell dpkg-parsechangelog -SVersion | sed -e 's/[~+-].*//')
-SRC := debian/ownfs-dkms/usr/src/ownfs-$(VERSION)
+SRC := debian/removablefs-dkms/usr/src/removablefs-$(VERSION)
 
 %:
 	dh $@
@@ -17,11 +17,11 @@ override_dh_install:
 	dh_install
 
 override_dh_dkms:
-	dh_dkms -p ownfs-dkms -V $(VERSION) -- module/dkms.conf
+	dh_dkms -p removablefs-dkms -V $(VERSION) -- module/dkms.conf
 
 override_dh_installudev:
-	cp data/udev/85-ownfs.rules debian/ownfs.udev
-	dh_installudev -p ownfs --priority=85
+	cp data/udev/85-removablefs.rules debian/removablefs.udev
+	dh_installudev -p removablefs --priority=85
 
 override_dh_clean:
-	dh_clean debian/ownfs.udev
+	dh_clean debian/removablefs.udev

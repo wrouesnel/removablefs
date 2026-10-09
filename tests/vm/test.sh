@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build ownfs in a test VM, install it with the udev rule, plug in a USB
+# Build removablefs in a test VM, install it with the udev rule, plug in a USB
 # disk and run the functional suite, then a surprise-removal test.
 #
 # Usage: DISTRO=<distro> test.sh [fstype...]    (default: all supported)
@@ -25,9 +25,9 @@ log() { printf '>>> [%s] %s\n' "$DISTRO" "$*"; }
 
 "${HERE}/install.sh"
 
-"$V" ssh 'rm -rf ownfs-tests && mkdir ownfs-tests'
-"$V" scp "${TOP}/tests/functional/run.sh" ownfs-tests/run.sh >/dev/null
-"$V" scp "${TOP}/tests/functional/stress.py" ownfs-tests/stress.py >/dev/null
+"$V" ssh 'rm -rf removablefs-tests && mkdir removablefs-tests'
+"$V" scp "${TOP}/tests/functional/run.sh" removablefs-tests/run.sh >/dev/null
+"$V" scp "${TOP}/tests/functional/stress.py" removablefs-tests/stress.py >/dev/null
 
 "$V" unplug "$DISK" 2>/dev/null || true
 "$V" mkdisk "$DISK" 512M >/dev/null
@@ -42,7 +42,7 @@ done
 log "USB disk is $dev; running functional tests (${FSTYPES[*]})"
 
 rc=0
-"$V" ssh "sudo bash ownfs-tests/run.sh $dev ${FSTYPES[*]}" || rc=$?
+"$V" ssh "sudo bash removablefs-tests/run.sh $dev ${FSTYPES[*]}" || rc=$?
 
 # Concurrency: racing workers on a udisks2 mount, then fsck and the log.
 STRESS="${STRESS:-60}"
@@ -54,8 +54,8 @@ if [[ "$STRESS" -gt 0 ]]; then
             sudo wipefs -aq $dev; sudo mkfs.$fs -q -f $dev 2>/dev/null || sudo mkfs.$fs -q -F $dev
             sudo udevadm settle; sudo udevadm trigger -w --action=change $dev 2>/dev/null || sudo udevadm trigger --action=change $dev; sudo udevadm settle
             out=\$(sudo -u alice udisksctl mount -b $dev); mp=\${out##* at }; mp=\${mp%.}
-            sudo install -m 0644 ownfs-tests/stress.py /tmp/ownfs-stress.py
-            st=0; cd /tmp; sudo -u alice python3 /tmp/ownfs-stress.py \$mp $STRESS 8 || st=\$?
+            sudo install -m 0644 removablefs-tests/stress.py /tmp/removablefs-stress.py
+            st=0; cd /tmp; sudo -u alice python3 /tmp/removablefs-stress.py \$mp $STRESS 8 || st=\$?
             sudo -u alice udisksctl unmount -b $dev
             test \$st -eq 0
             case $fs in ext4) sudo e2fsck -fn $dev >/dev/null ;; xfs) sudo xfs_repair -n $dev >/dev/null 2>&1 ;; esac
@@ -80,14 +80,14 @@ log "surprise removal"
 "$V" unplug "$DISK"
 sleep 5
 if "$V" ssh 'sudo pkill -u alice -f "while echo x" ; sleep 1; sudo umount -l /media/alice/SURPRISE 2>/dev/null; sleep 2;
-        ! sudo dmesg | grep -E -q "BUG:|Oops|general protection|KASAN|WARNING:.*ownfs"'; then
+        ! sudo dmesg | grep -E -q "BUG:|Oops|general protection|KASAN|WARNING:.*removablefs"'; then
     echo "  ok    surprise removal: no kernel errors"
 else
     echo "  FAIL  surprise removal left kernel errors:"
     "$V" ssh 'sudo dmesg | grep -E -A20 "BUG:|Oops|general protection|KASAN|WARNING:" | head -60'
     rc=1
 fi
-if "$V" ssh 'sudo modprobe -r ownfs'; then
+if "$V" ssh 'sudo modprobe -r removablefs'; then
     echo "  ok    module unloads afterwards"
 else
     echo "  FAIL  module still in use after surprise removal"
