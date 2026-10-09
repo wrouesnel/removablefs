@@ -27,7 +27,7 @@ jobs:
       matrix:
         include:
           - { name: ubuntu-22.04, image: "ubuntu:22.04", headers: linux-headers-generic }
-          - { name: ubuntu-22.04-hwe, image: "ubuntu:22.04", headers: linux-headers-generic-hwe-22.04 }
+          - { name: ubuntu-22.04-hwe, image: "ubuntu:22.04", headers: linux-headers-generic-hwe-22.04 gcc-12 }
           - { name: ubuntu-24.04, image: "ubuntu:24.04", headers: linux-headers-generic }
           - { name: ubuntu-24.04-hwe, image: "ubuntu:24.04", headers: linux-headers-generic-hwe-24.04 }
           - { name: ubuntu-26.04, image: "ubuntu:26.04", headers: linux-headers-generic }
@@ -102,7 +102,10 @@ jobs:
           dnf -y -q install kernel-devel
           dnf -y -q install dist/noarch/*.rpm
           kver="$(ls /usr/src/kernels | sort -V | tail -1)"
-          dkms build -m removablefs -v "$(sed -n 's/^Version: *//p' rpm/removablefs.spec)" -k "$kver"
+          # A container has kernel-devel but no kernel, so no
+          # /lib/modules/<ver>/build link: point DKMS at the headers.
+          dkms build -m removablefs -v "$(sed -n 's/^Version: *//p' rpm/removablefs.spec)" -k "$kver" \
+            --kernelsourcedir "/usr/src/kernels/$kver"
           dkms status
       - uses: actions/upload-artifact@v4
         with:
