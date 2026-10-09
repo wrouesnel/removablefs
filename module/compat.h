@@ -57,22 +57,32 @@ typedef int ownfs_mkdir_ret_t;
 #define OWNFS_MKDIR_RET(err)	(err)
 #endif
 
-/* Lower-filesystem lookups.  The caller holds the parent locked. */
+/*
+ * Lower-filesystem lookups.  lookup_noperm*() (6.15+) store the name's hash,
+ * salted for @base, into the qstr they are given, so they must never see an
+ * ownfs dentry's d_name: rewriting the hash of a hashed dentry corrupts the
+ * dcache.  Hand them a copy.
+ */
 static inline struct dentry *ownfs_lookup_locked(struct dentry *base,
 						 const struct qstr *name)
 {
 #if defined(HAVE_LOOKUP_NOPERM)
-	return lookup_noperm((struct qstr *)name, base);
+	struct qstr q = QSTR_INIT(name->name, name->len);
+
+	return lookup_noperm(&q, base);
 #else
 	return lookup_one_len(name->name, base, name->len);
 #endif
 }
 
+/* The same, for when the caller doesn't hold the parent locked. */
 static inline struct dentry *ownfs_lookup_unlocked(struct dentry *base,
 						   const struct qstr *name)
 {
 #if defined(HAVE_LOOKUP_NOPERM)
-	return lookup_noperm_unlocked((struct qstr *)name, base);
+	struct qstr q = QSTR_INIT(name->name, name->len);
+
+	return lookup_noperm_unlocked(&q, base);
 #else
 	return lookup_one_len_unlocked(name->name, base, name->len);
 #endif
@@ -98,7 +108,17 @@ static inline struct dentry *ownfs_vfs_mkdir(struct inode *dir,
 					     umode_t mode)
 {
 #if defined(HAVE_VFS_MKDIR_DELEG)
-	return vfs_mkdir(OWNFS_LOWER_NS dir, dentry, mode, NULL);
+	/*
+	 * Since 6.19 (the release that added the delegated_inode argument)
+	 * a failing vfs_mkdir() also unlocks @dir via end_creating().  Take
+	 * the lock again so that, as with every other ownfs_vfs_*(), the
+	 * caller still holds it afterwards.
+	 */
+	struct dentry *de = vfs_mkdir(OWNFS_LOWER_NS dir, dentry, mode, NULL);
+
+	if (IS_ERR(de))
+		inode_lock_nested(dir, I_MUTEX_PARENT);
+	return de;
 #elif defined(HAVE_VFS_MKDIR_DENTRY)
 	return vfs_mkdir(OWNFS_LOWER_NS dir, dentry, mode);
 #else

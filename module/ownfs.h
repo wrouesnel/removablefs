@@ -52,6 +52,7 @@ struct ownfs_sb_info {
 	bool quiet;
 	dev_t anon_dev;			/* restored before kill_anon_super() */
 	char lower_type[OWNFS_TYPE_LEN];
+	char *lower_opts;		/* passed through, shown in mountinfo */
 };
 
 struct ownfs_inode_info {

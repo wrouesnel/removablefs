@@ -174,6 +174,7 @@ static struct vfsmount *ownfs_mount_lower_type(const char *type, int flags,
 {
 	struct file_system_type *fstype;
 	struct vfsmount *mnt;
+	char *data;
 
 	if (!strcmp(type, OWNFS_NAME))
 		return ERR_PTR(-EINVAL);
@@ -185,7 +186,18 @@ static struct vfsmount *ownfs_mount_lower_type(const char *type, int flags,
 		ownfs_put_filesystem(fstype);
 		return ERR_PTR(-EINVAL);
 	}
-	mnt = vfs_kern_mount(fstype, flags, o->source, o->lower_data);
+	/*
+	 * Filesystems parse their option string in place (strsep), so each
+	 * attempt gets a fresh copy and o->lower_data stays intact for
+	 * show_options and the next probe.
+	 */
+	data = o->lower_data ? kstrdup(o->lower_data, GFP_KERNEL) : NULL;
+	if (o->lower_data && !data) {
+		ownfs_put_filesystem(fstype);
+		return ERR_PTR(-ENOMEM);
+	}
+	mnt = vfs_kern_mount(fstype, flags, o->source, data);
+	kfree(data);
 	ownfs_put_filesystem(fstype);
 	return mnt;
 }
@@ -314,6 +326,11 @@ static int ownfs_fill_super(struct super_block *sb,
 	sbi->disk_uid = o->disk_uid_set ? o->disk_uid : d_inode(lower_root)->i_uid;
 	sbi->disk_gid = o->disk_gid_set ? o->disk_gid : d_inode(lower_root)->i_gid;
 	sbi->quiet = o->quiet;
+	if (o->lower_data) {
+		sbi->lower_opts = kstrdup(o->lower_data, GFP_KERNEL);
+		if (!sbi->lower_opts)
+			return -ENOMEM;
+	}
 
 	err = -ENOMEM;
 	sbi->cred = ownfs_make_cred(sbi->disk_uid, sbi->disk_gid);
@@ -376,6 +393,7 @@ static void ownfs_kill_sb(struct super_block *sb)
 			mntput(sbi->lower_mnt);
 		if (sbi->cred)
 			put_cred(sbi->cred);
+		kfree(sbi->lower_opts);
 		kfree(sbi);
 	}
 }
@@ -467,6 +485,10 @@ static int ownfs_show_options(struct seq_file *m, struct dentry *root)
 		   from_kgid_munged(&init_user_ns, sbi->disk_gid));
 	if (sbi->quiet)
 		seq_puts(m, ",quiet");
+	if (sbi->lower_opts) {
+		seq_putc(m, ',');
+		seq_escape(m, sbi->lower_opts, " \t\n\\");
+	}
 	return 0;
 }
 

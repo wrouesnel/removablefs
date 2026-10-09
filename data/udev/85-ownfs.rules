@@ -35,5 +35,7 @@ ENV{OWNFS_LOWER_TYPE}="$env{ID_FS_TYPE}"
 ENV{ID_FS_TYPE}="ownfs"
 ENV{UDISKS_MOUNT_OPTIONS_OWNFS_DEFAULTS}="uid=$$UID,gid=$$GID,lower=$env{OWNFS_LOWER_TYPE}"
 ENV{UDISKS_MOUNT_OPTIONS_OWNFS_ALLOW}="uid=$$UID,gid=$$GID,lower=$env{OWNFS_LOWER_TYPE}"
+# udisks2 mounts ext2/3/4 with errors=remount-ro; ownfs passes it through.
+ENV{OWNFS_LOWER_TYPE}=="ext2|ext3|ext4", ENV{UDISKS_MOUNT_OPTIONS_OWNFS_DEFAULTS}="$env{UDISKS_MOUNT_OPTIONS_OWNFS_DEFAULTS},errors=remount-ro", ENV{UDISKS_MOUNT_OPTIONS_OWNFS_ALLOW}="$env{UDISKS_MOUNT_OPTIONS_OWNFS_ALLOW},errors=remount-ro"
 
 LABEL="ownfs_end"
